@@ -4,83 +4,10 @@ import warp as wp
 
 import matplotlib.pyplot as plt
 import argparse
+import time
 
+from _utils import voxel2hex, hex2tets
 from coloring import graph_coloring
-
-
-def voxel2hex (voxels, dx, dy, dz):
-    """
-    Standard order of the hex vertices for vtk meshes or gmsh.
-         5 -------- 6
-        /|         /|
-       4 -------- 7 |
-       | |        | |
-       | 1 -------|-2
-       |/         |/
-       0 -------- 3
-    """
-    nx, ny, nz = voxels.shape
-    # One more vertex than cells in each direction
-    vertex_flag = np.full((nx+1, ny+1, nz+1), -1, dtype=int)
-    for i in range(nx):
-        for j in range(ny):
-            for k in range(nz):
-                if voxels[i][j][k]:
-                    for ii in range(2):
-                        for jj in range(2):
-                            for kk in range(2):
-                                vertex_flag[i + ii, j + jj, k + kk] = 0
-
-    vertex_cnt = 0
-    vertices = []
-    for i in range(nx+1):
-        for j in range(ny+1):
-            for k in range(nz+1):
-                if vertex_flag[i,j,k] == 0:
-                    vertex_flag[i,j,k] = vertex_cnt
-                    vertices.append((dx * i, dy * j, dz * k))
-                    vertex_cnt += 1
-
-    # Specific hexahedron face ordering
-    elements = []
-    for i in range(nx):
-        for j in range(ny):
-            for k in range(nz):
-                if voxels[i,j,k]:
-                    elements.append([
-                        vertex_flag[i,j,k],
-                        vertex_flag[i,j+1,k],
-                        vertex_flag[i+1,j+1,k],
-                        vertex_flag[i+1,j,k],
-                        vertex_flag[i,j,k+1],
-                        vertex_flag[i,j+1,k+1],
-                        vertex_flag[i+1,j+1,k+1],
-                        vertex_flag[i+1,j,k+1],
-                    ])
-
-    vertices = np.stack(vertices, axis=0)
-    elements = np.stack(elements, axis=0)
-
-    return vertices, elements
-
-
-def hex2tets (hex_elements):
-    """
-    Convert the hexahedrons defined above into tetrahedrons that have positive volume based on (x1-x0).dot((x2-x0)x(x3-x0)) > 0.
-    Each hexahedron is split into 5 tetrahedrons.
-    """
-    n_hex = len(hex_elements)
-    n_tet = 5 * n_hex
-
-    tet_elements = np.zeros([n_tet, 4], dtype=int)
-    for i in range(n_hex):
-        tet_elements[5*i] = np.array([hex_elements[i, 0], hex_elements[i, 1], hex_elements[i, 4], hex_elements[i, 3]])
-        tet_elements[5*i+1] = np.array([hex_elements[i, 1], hex_elements[i, 2], hex_elements[i, 6], hex_elements[i, 3]])
-        tet_elements[5*i+2] = np.array([hex_elements[i, 1], hex_elements[i, 3], hex_elements[i, 6], hex_elements[i, 4]])
-        tet_elements[5*i+3] = np.array([hex_elements[i, 1], hex_elements[i, 4], hex_elements[i, 6], hex_elements[i, 5]])
-        tet_elements[5*i+4] = np.array([hex_elements[i, 3], hex_elements[i, 4], hex_elements[i, 7], hex_elements[i, 6]])
-        
-    return tet_elements
 
 
 if __name__ == "__main__":
@@ -106,18 +33,22 @@ if __name__ == "__main__":
     tet_indices = elements.flatten().tolist()
     print(f"Generated tetrahedral mesh with {len(points)} vertices and {len(elements)} elements.")
 
-
+    start_time = time.time()
     colors = graph_coloring(elements)
-    print(f"Assigned colors to elements: {colors}")
+    end_time = time.time()
+    print(f"Assigned {colors.max() + 1} colors in {(end_time - start_time)*1000:.4f}ms.")
 
-    ### Plot coloring
-    fig, ax = plt.subplots(figsize=(4, 4))
+    ### Plot coloring in 3D
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
     for ele in elements:
-        ax.plot(vertices[ele,0], vertices[ele,1], 'k-', linewidth=1.0, alpha=0.3)
-    ax.scatter(vertices[:,0], vertices[:,1], c=colors, cmap='jet', s=50, zorder=10)
-    ax.set_title('Graph Coloring of Mesh Vertices')
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_aspect('equal')
+        ax.plot(vertices[ele[[0,1]],0], vertices[ele[[0,1]],1], vertices[ele[[0,1]],2], 'k-', linewidth=1.0, alpha=0.8)
+        ax.plot(vertices[ele[[0,2]],0], vertices[ele[[0,2]],1], vertices[ele[[0,2]],2], 'k-', linewidth=1.0, alpha=0.8)
+        ax.plot(vertices[ele[[0,3]],0], vertices[ele[[0,3]],1], vertices[ele[[0,3]],2], 'k-', linewidth=1.0, alpha=0.8)
+        ax.plot(vertices[ele[[1,2]],0], vertices[ele[[1,2]],1], vertices[ele[[1,2]],2], 'k-', linewidth=1.0, alpha=0.8)
+        ax.plot(vertices[ele[[1,3]],0], vertices[ele[[1,3]],1], vertices[ele[[1,3]],2], 'k-', linewidth=1.0, alpha=0.8)
+        ax.plot(vertices[ele[[2,3]],0], vertices[ele[[2,3]],1], vertices[ele[[2,3]],2], 'k-', linewidth=1.0, alpha=0.8)
+    ax.scatter(vertices[:,0], vertices[:,1], vertices[:,2], c=colors, cmap='jet', s=50, alpha=1.0)
+    ax.set_title("Graph Coloring of Tetrahedral Mesh Vertices")
     fig.savefig("graph_coloring.png", dpi=300, bbox_inches='tight')
     plt.close(fig)
