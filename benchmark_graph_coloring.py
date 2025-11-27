@@ -7,7 +7,7 @@ import argparse
 import time
 
 from _utils import voxel2hex, hex2tets
-from coloring import graph_coloring
+from coloring import graph_coloring, graph_coloring_wp
 
 # Matplotlib global settings
 plt.rcParams.update({"font.size": 7})
@@ -27,7 +27,10 @@ if __name__ == "__main__":
         "num_vertices": [],
         "num_elements": [],
         "num_colors": [],
-        "times": []
+        "times": {
+            "numpy": [],
+            "parallel": []
+        },
     }
     for nx in num_voxels:
         ### Set up tetrahedral mesh
@@ -41,56 +44,62 @@ if __name__ == "__main__":
         metrics["num_vertices"].append(len(points))
         metrics["num_elements"].append(len(elements))
 
-        times = []
+        times = {"numpy": [], "parallel": []}
         for _ in range(num_samples):
+            ### Graph coloring using Greedy Numpy
             start_time = time.time()
             colors = graph_coloring(elements)
             end_time = time.time()
 
-            times.append((end_time - start_time))
+            times["numpy"].append((end_time - start_time))
             print(f"Assigned {colors.max() + 1} colors in {(end_time - start_time)*1000:.4f}ms.")
+
+            ### Graph coloring using Greedy Parallel
+            start_time = time.time()
+            colors_wp = graph_coloring_wp(elements)
+            end_time = time.time()
+
+            times["parallel"].append((end_time - start_time))
+            print(f"Assigned {colors_wp.max() + 1} colors in {(end_time - start_time)*1000:.4f}ms.")
+
+            assert np.array_equal(colors, colors_wp), "Colorings do not match between methods!"
     
-        metrics["times"].append(times)
+        metrics["times"]["numpy"].append(times["numpy"])
+        metrics["times"]["parallel"].append(times["parallel"])
         metrics["num_colors"].append(colors.max() + 1)
 
-    
-    ### Plot performance scaling
-    times_mean = [np.mean(t) for t in metrics["times"]]
-    times_std = [np.std(t) for t in metrics["times"]]
+        
+        ### Plot performance scaling
+        fig, axs = plt.subplots(1, 2, figsize=(200*mm, 70*mm))
+        fig.subplots_adjust(wspace=0.4)
 
-    fig, axs = plt.subplots(1, 3, figsize=(180*mm, 40*mm))
-    fig.subplots_adjust(wspace=0.4)
+        for method in metrics["times"]:
+            times_mean = [np.mean(t) for t in metrics["times"][method]]
+            times_std = [np.std(t) for t in metrics["times"][method]]
+            axs[0].plot(metrics["num_elements"], times_mean, 'o-', label=method.capitalize())
+            axs[0].fill_between(metrics["num_elements"], np.array(times_mean)-np.array(times_std), np.array(times_mean)+np.array(times_std), alpha=0.3)
+        axs[0].set_xscale('log')
+        axs[0].set_yscale('log')
+        axs[0].set_xlabel("Number of Elements (-)")
+        axs[0].set_ylabel("Time (s)")
+        axs[0].legend()
+        axs[0].grid()
 
-    axs[0].plot(metrics["num_elements"], times_mean, 'o-', label="Numpy")
-    axs[0].fill_between(metrics["num_elements"], np.array(times_mean)-np.array(times_std), np.array(times_mean)+np.array(times_std), alpha=0.3)
-    axs[0].set_xscale('log')
-    axs[0].set_yscale('log')
-    axs[0].set_xlabel("Number of Elements (-)")
-    axs[0].set_ylabel("Time (s)")
-    axs[0].legend()
-    axs[0].grid()
+        for method in metrics["times"]:
+            times_mean = [np.mean(t) for t in metrics["times"][method]]
+            times_std = [np.std(t) for t in metrics["times"][method]]
+            axs[1].plot(metrics["num_vertices"], times_mean, 'o-', label=method.capitalize())
+            axs[1].fill_between(metrics["num_vertices"], np.array(times_mean)-np.array(times_std), np.array(times_mean)+np.array(times_std), alpha=0.3)
+        axs[1].set_xscale('log')
+        axs[1].set_yscale('log')
+        axs[1].set_xlabel("Number of Vertices (-)")
+        axs[1].set_ylabel("Time (s)")
+        axs[1].legend()
+        axs[1].grid()
+        fig.suptitle("Graph Coloring Performance Scaling")
 
-    axs[1].plot(metrics["num_vertices"], times_mean, 'o-', label="Numpy")
-    axs[1].fill_between(metrics["num_vertices"], np.array(times_mean)-np.array(times_std), np.array(times_mean)+np.array(times_std), alpha=0.3)
-    axs[1].set_xscale('log')
-    axs[1].set_yscale('log')
-    axs[1].set_xlabel("Number of Vertices (-)")
-    axs[1].set_ylabel("Time (s)")
-    axs[1].legend()
-    axs[1].grid()
-    axs[1].set_title("Graph Coloring Performance Scaling")
-
-    axs[2].plot(metrics["num_colors"], times_mean, 'o-', label="Numpy")
-    axs[2].fill_between(metrics["num_colors"], np.array(times_mean)-np.array(times_std), np.array(times_mean)+np.array(times_std), alpha=0.3)
-    axs[2].set_xscale('log')
-    axs[2].set_yscale('log')
-    axs[2].set_xlabel("Number of Colors (-)")
-    axs[2].set_ylabel("Time (s)")
-    axs[2].legend()
-    axs[2].grid()
-
-    fig.savefig("graph_coloring_benchmark.png", dpi=300, bbox_inches='tight')
-    plt.close(fig)
+        fig.savefig("graph_coloring_benchmark.png", dpi=300, bbox_inches='tight')
+        plt.close(fig)
 
 
 
