@@ -4,6 +4,8 @@ import warp as wp
 
 import argparse
 
+from coloring import graph_coloring
+
 
 def voxel2hex (voxels, dx, dy, dz):
     """
@@ -82,10 +84,10 @@ def hex2tets (hex_elements):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--nx", type=int, default=4, help="Number of voxels in x direction")
-    parser.add_argument("--ny", type=int, default=4, help="Number of voxels in y direction")
-    parser.add_argument("--nz", type=int, default=4, help="Number of voxels in z direction")
-    parser.add_argument("--dx", type=float, default=0.5, help="Voxel size in x direction")
+    parser.add_argument("--nx", type=int, default=1, help="Number of voxels in x direction")
+    parser.add_argument("--ny", type=int, default=1, help="Number of voxels in y direction")
+    parser.add_argument("--nz", type=int, default=1, help="Number of voxels in z direction")
+    parser.add_argument("--dx", type=float, default=1.0, help="Voxel size in x direction")
     parser.add_argument("--dy", type=float, default=None, help="Voxel size in y direction")
     parser.add_argument("--dz", type=float, default=None, help="Voxel size in z direction")
     args = parser.parse_args()
@@ -103,4 +105,6 @@ if __name__ == "__main__":
     tet_indices = elements.flatten().tolist()
     print(f"Generated tetrahedral mesh with {len(points)} vertices and {len(elements)} elements.")
 
-    
+
+    colors = graph_coloring(elements)
+    print(f"Assigned colors to elements: {colors}")
