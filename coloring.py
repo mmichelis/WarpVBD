@@ -15,23 +15,26 @@ def graph_coloring (elements : np.ndarray) -> np.ndarray:
     MAX_COLORS = 256 # Upper bound on number of colors
 
     num_vertices = elements.max() + 1 # Assumes no missing vertices
-    coloring = np.ones(num_vertices, dtype=int) * -1  # -1 means uncolored
+    # Compute adjacency dict
+    adjacency = {i: set() for i in range(num_vertices)}
     for ele in elements:
-        # Gather existing colors
-        element_colors = set()
-        for vertex_idx in ele:
-            if coloring[vertex_idx] != -1:
-                element_colors.add(coloring[vertex_idx])
-        # Color new vertices
-        for vertex_idx in ele:
-            if coloring[vertex_idx] == -1:
-                c = 0
-                for c in range(MAX_COLORS):
-                    if c not in element_colors:
-                        coloring[vertex_idx] = c
-                        element_colors.add(c)
-                        break
-                
-    assert coloring.min() != -1, "Graph coloring failed: some vertices remain uncolored."
+        for i in range(len(ele)):
+            for j in range(i + 1, len(ele)):
+                adjacency[ele[i]].add(ele[j])
+                adjacency[ele[j]].add(ele[i])
+    
+    coloring = -1 * np.ones(num_vertices, dtype=int)
+    for vertex in range(num_vertices):
+        # Find used colors among neighbors
+        used_colors = set()
+        for neighbor in adjacency[vertex]:
+            if coloring[neighbor] != -1:
+                used_colors.add(coloring[neighbor])
+        
+        # Assign the lowest available color
+        for color in range(MAX_COLORS):
+            if color not in used_colors:
+                coloring[vertex] = color
+                break
 
     return coloring

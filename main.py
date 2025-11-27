@@ -2,6 +2,7 @@
 import numpy as np
 import warp as wp
 
+import matplotlib.pyplot as plt
 import argparse
 
 from coloring import graph_coloring
@@ -108,3 +109,15 @@ if __name__ == "__main__":
 
     colors = graph_coloring(elements)
     print(f"Assigned colors to elements: {colors}")
+
+    ### Plot coloring
+    fig, ax = plt.subplots(figsize=(4, 4))
+    for ele in elements:
+        ax.plot(vertices[ele,0], vertices[ele,1], 'k-', linewidth=1.0, alpha=0.3)
+    ax.scatter(vertices[:,0], vertices[:,1], c=colors, cmap='jet', s=50, zorder=10)
+    ax.set_title('Graph Coloring of Mesh Vertices')
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_aspect('equal')
+    fig.savefig("graph_coloring.png", dpi=300, bbox_inches='tight')
+    plt.close(fig)
