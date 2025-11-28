@@ -8,6 +8,7 @@ import time
 
 from _utils import voxel2hex, hex2tets
 from coloring import graph_coloring, graph_coloring_wp
+from benchmark import benchmark_functions
 
 # Matplotlib global settings
 plt.rcParams.update({"font.size": 7})
@@ -44,29 +45,10 @@ if __name__ == "__main__":
         metrics["num_vertices"].append(len(points))
         metrics["num_elements"].append(len(elements))
 
-        times = {"numpy": [], "parallel": []}
-        for _ in range(num_samples):
-            ### Graph coloring using Greedy Numpy
-            start_time = time.time()
-            colors = graph_coloring(elements)
-            end_time = time.time()
-
-            times["numpy"].append((end_time - start_time))
-            print(f"Assigned {colors.max() + 1} colors in {(end_time - start_time)*1000:.4f}ms.")
-
-            ### Graph coloring using Greedy Parallel
-            start_time = time.time()
-            colors_wp = graph_coloring_wp(elements)
-            end_time = time.time()
-
-            times["parallel"].append((end_time - start_time))
-            print(f"Assigned {colors_wp.max() + 1} colors in {(end_time - start_time)*1000:.4f}ms.")
-
-            assert np.array_equal(colors, colors_wp), "Colorings do not match between methods!"
+        times = benchmark_functions([graph_coloring, graph_coloring_wp], elements, num_samples=num_samples)
     
-        metrics["times"]["numpy"].append(times["numpy"])
-        metrics["times"]["parallel"].append(times["parallel"])
-        metrics["num_colors"].append(colors.max() + 1)
+        metrics["times"]["numpy"].append(times["graph_coloring"])
+        metrics["times"]["parallel"].append(times["graph_coloring_wp"])
 
         
         ### Plot performance scaling
