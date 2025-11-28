@@ -4,6 +4,13 @@ import warp as wp
 
 
 
+# @wp.kernel
+# def kernel_resolve_conflicts (
+#     coloring: wp.array(dtype=wp.int32),
+#     vertices_inspect: wp.array(dtype=wp.int32),
+#     adjacency: wp.array(dtype=wp.int32),
+
+
 def assign_color (coloring: np.ndarray, neighbors: set) -> int:
     """
     Helper function to assign the lowest available color not used by neighbors.
@@ -58,8 +65,21 @@ def graph_coloring (elements: np.ndarray) -> np.ndarray:
                 coloring[vertex] = color
                 break
 
+    print(f"Assigned {coloring.max() + 1} colors.")
+    print(f"Color distribution: {np.bincount(coloring)}")
+
     return coloring
 
+
+def find_neighbors (adjacency: np.ndarray, vertex: int) -> list:
+    """
+    Helper function to find neighbors of a vertex from adjacency matrix.
+    """
+    neighbors = []
+    for i in range(adjacency.shape[0]):
+        if adjacency[vertex, i] > 0:
+            neighbors.append(i)
+    return neighbors
 
 def graph_coloring_wp (elements: np.ndarray) -> np.ndarray:
     """
@@ -72,17 +92,19 @@ def graph_coloring_wp (elements: np.ndarray) -> np.ndarray:
         np.ndarray [num_vertices]: Array of colors assigned to each vertex. -1 indicates uncolored.
     """
     num_vertices = elements.max() + 1 # Assumes no missing vertices
-    # Compute adjacency dict
-    adjacency = {i: set() for i in range(num_vertices)}
+    # Compute adjacency matrix
+    adjacency = np.zeros([num_vertices, num_vertices], dtype=int)
+    # parallel
     for ele in elements:
-        for i in range(len(ele)):
+        for i, ele_i in enumerate(ele):
             # i and j are distinct
             for j in range(i + 1, len(ele)):
-                adjacency[ele[i]].add(ele[j])
-                adjacency[ele[j]].add(ele[i])
+                # addition to prevent race conditions
+                adjacency[ele_i, ele[j]] += 1
+                adjacency[ele[j], ele_i] += 1
 
     coloring = -1 * np.ones(num_vertices, dtype=int)
-    # Parallelizable
+    # parallel
     for vertex in range(num_vertices):
         coloring[vertex] = assign_color(coloring, adjacency[vertex])
 
@@ -95,9 +117,10 @@ def graph_coloring_wp (elements: np.ndarray) -> np.ndarray:
         conflicts = []
         # parallel
         for vertex in vertices_inspect:
-            for neighbor in adjacency[vertex]:
+            neighbors = find_neighbors(adjacency, vertex)
+            for neighbor in neighbors:
                 if coloring[neighbor] == coloring[vertex]:
-                    coloring[vertex] = assign_color(coloring, adjacency[vertex])
+                    coloring[vertex] = assign_color(coloring, neighbors)
                     conflicts.append(vertex)
                     break
     
@@ -105,5 +128,5 @@ def graph_coloring_wp (elements: np.ndarray) -> np.ndarray:
         iteration += 1
         assert iteration < MAX_ITER, "Exceeded maximum number of conflict resolution rounds"
 
-    print(f"Graph coloring resolved in {iteration} rounds.")
+    print(f"Graph coloring resolved in {iteration-1} rounds.")
     return coloring
