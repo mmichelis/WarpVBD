@@ -3,8 +3,6 @@ import numpy as np
 import warp as wp
 
 import matplotlib.pyplot as plt
-import argparse
-import time
 
 from _utils import voxel2hex, hex2tets
 from coloring import graph_coloring, graph_coloring_wp
@@ -27,7 +25,6 @@ if __name__ == "__main__":
     metrics = {
         "num_vertices": [],
         "num_elements": [],
-        "num_colors": [],
         "times": {
             "numpy": [],
             "parallel": []
@@ -80,7 +77,7 @@ if __name__ == "__main__":
         axs[1].grid()
         fig.suptitle("Graph Coloring Performance Scaling")
 
-        fig.savefig("graph_coloring_benchmark.png", dpi=300, bbox_inches='tight')
+        fig.savefig("outputs/benchmark_graph_coloring.png", dpi=300, bbox_inches='tight')
         plt.close(fig)
 
 
