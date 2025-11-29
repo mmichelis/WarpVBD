@@ -93,9 +93,11 @@ def accumulate_grad_hess (
 
 @wp.kernel
 def solve_grad_hess (
+    positions: wp.array(dtype=wp.vec3d),
     gradients: wp.array(dtype=wp.float64, shape=(1, 1, 3)),
     hessians: wp.array(dtype=wp.float64, shape=(1, 1, 3, 3)),
-    dx: wp.array(dtype=wp.float64, shape=(1, 3))
+    dx: wp.array(dtype=wp.float64, shape=(1, 3)),
+    new_positions: wp.array(dtype=wp.vec3d)
 ) -> None:
     i = wp.tid()
 
@@ -109,7 +111,11 @@ def solve_grad_hess (
     L = wp.tile_cholesky(total_hess)
     res = wp.tile_cholesky_solve(L, -total_grad)
     wp.tile_store(dx[i], res)
-    # dx[i] += res
+
+    # Update positions
+    for j in range(3):
+        new_positions[i][j] = positions[i][j] + dx[i][j]
+    
 
 
 # @wp.kernel
@@ -153,14 +159,14 @@ def step (
         outputs=[gradients, hessians]
     )
     dx = wp.zeros((n_vertices, 3), dtype=wp.float64)
+    new_positions = wp.zeros_like(positions)
     wp.launch_tiled(
         solve_grad_hess,
         dim=n_vertices,
         block_dim=64,
-        inputs=[gradients, hessians],
-        outputs=[dx]
+        inputs=[positions, gradients, hessians],
+        outputs=[dx, new_positions]
     )
-    # new_positions = positions + dx
     breakpoint()
 
     return new_positions
