@@ -3,7 +3,7 @@
 import numpy as np
 import warp as wp
 
-
+EPS = 1e-12
 MAX_ELEMENTS_PER_VERTEX = 128
 
 @wp.func
@@ -95,8 +95,8 @@ def accumulate_grad_hess (
 
 
 @wp.func
-def is_zero (a: wp.float64) -> bool:
-    return wp.abs(a) < 1e-12
+def abs_sum (a: wp.float64, b: wp.float64) -> wp.float64:
+    return wp.abs(a) + wp.abs(b)
 
 @wp.kernel
 def solve_grad_hess (
@@ -113,11 +113,8 @@ def solve_grad_hess (
     total_hess = wp.tile_sum(hess, axis=0)
 
     # check if all entries of hessian are zero
-    out = wp.tile_map(is_zero, total_hess)
-    is_all_zero = wp.tile_sum(out) == 0
-    if is_all_zero:
-        # No contribution to this vertex
-        return
+    abs_hess = wp.tile_reduce(abs_sum, total_hess)
+    # assert abs_hess < EPS, "Empty Hessian encountered!"
 
     # Solve for dx
     L = wp.tile_cholesky(total_hess)
@@ -184,6 +181,8 @@ def step (
         inputs=[positions, dx],
         outputs=[new_positions]
     )
+
+    # Check if nan TODO
     
     # print(f"Old positions: {positions.numpy()}")
     # print(f"Computed dx: {dx.numpy()}")
