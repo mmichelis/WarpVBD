@@ -4,6 +4,8 @@ import numpy as np
 import warp as wp
 
 
+MAX_ELEMENTS_PER_VERTEX = 128
+
 @wp.func
 def compute_gradient (
     positions: wp.array(dtype=wp.vec3d),
@@ -47,7 +49,8 @@ def compute_hessian (
         Hessian matrix.
     """
     # Placeholder implementation
-    hessian = wp.identity(3, dtype=wp.float64)
+    # hessian = wp.identity(3, dtype=wp.float64)
+    hessian = wp.mat33d()
     return hessian
 
 
@@ -57,8 +60,8 @@ def accumulate_grad_hess (
     elements: wp.array(dtype=wp.vec4i),
     adj_v2e: wp.array2d(dtype=wp.int32),
     color_groups: wp.array2d(dtype=wp.int32),
-    gradients: wp.array(dtype=wp.float64, shape=(1, 1, 3)),
-    hessians: wp.array(dtype=wp.float64, shape=(1, 1, 3, 3))
+    gradients: wp.array3d(dtype=wp.float64),
+    hessians: wp.array4d(dtype=wp.float64)
 ) -> None:
     """
     Accumulate gradients and Hessians for each vertex-element pair in parallel using graph coloring.
@@ -70,8 +73,8 @@ def accumulate_grad_hess (
         color_groups: Color assignments for vertices.
     
     Outputs:
-        gradients: Output array for gradients.
-        hessians: Output array for Hessians.
+        gradients: Output array for gradients of every element of each vertex.
+        hessians: Output array for Hessians of every element of each vertex.
     """
     c, i, j = wp.tid()
 
@@ -91,40 +94,48 @@ def accumulate_grad_hess (
             hessians[idx_v, j, k, l] = hess[k, l]
 
 
+@wp.func
+def is_zero (a: wp.float64) -> bool:
+    return wp.abs(a) < 1e-12
+
 @wp.kernel
 def solve_grad_hess (
-    positions: wp.array(dtype=wp.vec3d),
-    gradients: wp.array(dtype=wp.float64, shape=(1, 1, 3)),
-    hessians: wp.array(dtype=wp.float64, shape=(1, 1, 3, 3)),
-    dx: wp.array(dtype=wp.float64, shape=(1, 3)),
-    new_positions: wp.array(dtype=wp.vec3d)
+    gradients: wp.array3d(dtype=wp.float64),
+    hessians: wp.array4d(dtype=wp.float64),
+    dx: wp.array2d(dtype=wp.float64),
 ) -> None:
     i = wp.tid()
 
-    grad = wp.tile_load(gradients[i], (256, 3))
-    hess = wp.tile_load(hessians[i], (256, 3, 3))
+    grad = wp.tile_load(gradients[i], (MAX_ELEMENTS_PER_VERTEX, 3))
+    hess = wp.tile_load(hessians[i], (MAX_ELEMENTS_PER_VERTEX, 3, 3))
     # Sum up contributions of elements to vertices
     total_grad = wp.tile_sum(grad, axis=0)
     total_hess = wp.tile_sum(hess, axis=0)
+
+    # check if all entries of hessian are zero
+    out = wp.tile_map(is_zero, total_hess)
+    is_all_zero = wp.tile_sum(out) == 0
+    if is_all_zero:
+        # No contribution to this vertex
+        return
 
     # Solve for dx
     L = wp.tile_cholesky(total_hess)
     res = wp.tile_cholesky_solve(L, -total_grad)
     wp.tile_store(dx[i], res)
-
-    # Update positions
-    for j in range(3):
-        new_positions[i][j] = positions[i][j] + dx[i][j]
     
 
 
-# @wp.kernel
-# def add_dx (
-#     positions: wp.array(dtype=wp.vec3d),
-#     dx: wp.array(dtype=wp.vec3d)
-# ) -> None:
-#     i = wp.tid()
-#     positions[i] = positions[i] + dx[i]
+@wp.kernel
+def add_dx (
+    positions: wp.array(dtype=wp.vec3d),
+    dx: wp.array2d(dtype=wp.float64),
+    new_positions: wp.array(dtype=wp.vec3d)
+) -> None:
+    i = wp.tid()
+
+    for j in range(3):
+        new_positions[i][j] = positions[i][j] + dx[i][j]
 
 
 def step (    
@@ -159,15 +170,24 @@ def step (
         outputs=[gradients, hessians]
     )
     dx = wp.zeros((n_vertices, 3), dtype=wp.float64)
-    new_positions = wp.zeros_like(positions)
     wp.launch_tiled(
         solve_grad_hess,
         dim=n_vertices,
-        block_dim=64,
-        inputs=[positions, gradients, hessians],
-        outputs=[dx, new_positions]
+        block_dim=512,
+        inputs=[gradients, hessians],
+        outputs=[dx]
     )
-    breakpoint()
+    new_positions = wp.zeros_like(positions)
+    wp.launch(
+        add_dx,
+        dim=n_vertices,
+        inputs=[positions, dx],
+        outputs=[new_positions]
+    )
+    
+    # print(f"Old positions: {positions.numpy()}")
+    # print(f"Computed dx: {dx.numpy()}")
+    # print(f"New positions: {new_positions.numpy()}")
 
     return new_positions
 
