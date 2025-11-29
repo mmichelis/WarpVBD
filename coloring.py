@@ -9,7 +9,15 @@ import warp as wp
 #     coloring: wp.array(dtype=wp.int32),
 #     vertices_inspect: wp.array(dtype=wp.int32),
 #     adjacency: wp.array(dtype=wp.int32),
+#     conflicts: wp.array(dtype=wp.int32)
+# ):
+#     i, j = wp.tid()
+#     vertex = vertices_inspect[i]
+#     if adjacency[vertex, j] > 0:
+#         if coloring[j] == coloring[vertex]:
+#             coloring[vertex] = 
 
+#             conflicts[i] = i
 
 def assign_color (coloring: np.ndarray, neighbors: set) -> int:
     """
@@ -28,9 +36,24 @@ def assign_color (coloring: np.ndarray, neighbors: set) -> int:
             return color
 
     assert False, "Exceeded maximum number of colors"
-    
 
-def graph_coloring (elements: np.ndarray) -> np.ndarray:
+def compute_adjacency_dict (elements: np.ndarray) -> dict:
+    """
+    Helper function to compute adjacency dictionary from elements.
+    """
+    num_vertices = elements.max() + 1 # Assumes no missing vertices
+    maximal_degree = 0
+    adjacency = {i: set() for i in range(num_vertices)}
+    for ele in elements:
+        for i, ele_i in enumerate(ele):
+            for j in range(i + 1, len(ele)):
+                adjacency[ele_i].add(ele[j])
+                adjacency[ele[j]].add(ele_i)
+            maximal_degree = max(maximal_degree, len(adjacency[ele_i]))
+
+    return adjacency, maximal_degree
+
+def graph_coloring (adjacency: dict) -> np.ndarray:
     """
     Graph coloring algorithm to assign parallelizable mesh elements into different color groups.
 
@@ -41,17 +64,9 @@ def graph_coloring (elements: np.ndarray) -> np.ndarray:
         np.ndarray [num_vertices]: Array of colors assigned to each vertex. -1 indicates uncolored.
     """
     MAX_COLORS = 256 # Upper bound on number of colors
-
-    num_vertices = elements.max() + 1 # Assumes no missing vertices
-    # Compute adjacency dict
-    adjacency = {i: set() for i in range(num_vertices)}
-    for ele in elements:
-        for i in range(len(ele)):
-            for j in range(i + 1, len(ele)):
-                adjacency[ele[i]].add(ele[j])
-                adjacency[ele[j]].add(ele[i])
-    
+    num_vertices = len(adjacency)
     coloring = -1 * np.ones(num_vertices, dtype=int)
+    color_groups = {}
     for vertex in range(num_vertices):
         # Find used colors among neighbors
         used_colors = set()
@@ -63,12 +78,15 @@ def graph_coloring (elements: np.ndarray) -> np.ndarray:
         for color in range(MAX_COLORS):
             if color not in used_colors:
                 coloring[vertex] = color
+                if color not in color_groups:
+                    color_groups[color] = []
+                color_groups[color].append(vertex)
                 break
 
     print(f"Assigned {coloring.max() + 1} colors.")
     print(f"Color distribution: {np.bincount(coloring)}")
 
-    return coloring
+    return coloring, color_groups
 
 
 def find_neighbors (adjacency: np.ndarray, vertex: int) -> list:
@@ -114,7 +132,7 @@ def graph_coloring_wp (elements: np.ndarray) -> np.ndarray:
     vertices_inspect = np.arange(num_vertices)
     while len(vertices_inspect) > 0:
         # shared list of conflicts
-        conflicts = []
+        conflicts = wp.full(len(vertices_inspect), -1, dtype=wp.int32)
         # parallel
         for vertex in vertices_inspect:
             neighbors = find_neighbors(adjacency, vertex)
