@@ -12,7 +12,8 @@ def compute_gradient_hessian (
     vertex_idx: wp.int32,
     ele_idx: wp.int32,
     positions: wp.array(dtype=wp.vec3d),
-    velocities: wp.array(dtype=wp.vec3d),
+    old_positions: wp.array(dtype=wp.vec3d),
+    old_velocities: wp.array(dtype=wp.vec3d),
     inv_Dm: wp.array(dtype=wp.mat33d),
     dDs_dx: wp.array2d(dtype=wp.mat33d),
     masses: wp.array(dtype=wp.float64),
@@ -26,7 +27,8 @@ def compute_gradient_hessian (
     Compute the gradient and hessian of the energy with respect to vertex positions of a specific element.
     """
     x = positions[vertex_idx]
-    v = velocities[vertex_idx]
+    x_prev = old_positions[vertex_idx]
+    v_prev = old_velocities[vertex_idx]
     m = masses[ele_idx] * wp.float64(0.25) # Each vertex gets one-fourth of the element mass
     ele = elements[ele_idx]
     inv_D = inv_Dm[ele_idx]
@@ -63,7 +65,7 @@ def compute_gradient_hessian (
     hessian = wp.mat33d()
 
     # Kinetic
-    y = x + dt * v # + external accelerations, if any. TODO
+    y = x_prev + dt * v_prev # + external accelerations, if any. TODO
     gradient += m  / (dt * dt) * (x - y)
     hessian += m / (dt * dt) * wp.identity(3, dtype=wp.float64)
 
@@ -108,7 +110,8 @@ def compute_gradient_hessian (
 @wp.kernel
 def accumulate_grad_hess (
     positions: wp.array(dtype=wp.vec3d),
-    velocities: wp.array(dtype=wp.vec3d),
+    old_positions: wp.array(dtype=wp.vec3d),
+    old_velocities: wp.array(dtype=wp.vec3d),
     inv_Dm: wp.array(dtype=wp.mat33d),
     dDs_dx: wp.array2d(dtype=wp.mat33d),
     masses: wp.array(dtype=wp.float64),
@@ -128,7 +131,8 @@ def accumulate_grad_hess (
 
     Inputs:
         positions: Current vertex positions.
-        velocities: Current vertex velocities.
+        old_positions: Previous vertex positions.
+        old_velocities: Previous vertex velocities.
         inv_Dm: Inverted undeformed shape matrices for elements.
         dDs_dx: Derivatives of Ds with respect to positions. Shape [4, 3, 3, 3], a 3x3 matrix for each vertex of the tetrahedron.
         masses: Element masses.
@@ -153,7 +157,7 @@ def accumulate_grad_hess (
     if idx_v == -1 or idx_e == -1:
         return
     
-    grad, hess = compute_gradient_hessian(idx_v, idx_e, positions, velocities, inv_Dm, dDs_dx, masses, lame_mu, lame_lambda, gravity, dt, elements)
+    grad, hess = compute_gradient_hessian(idx_v, idx_e, positions, old_positions, old_velocities, inv_Dm, dDs_dx, masses, lame_mu, lame_lambda, gravity, dt, elements)
 
     for k in range(3):
         gradients[idx_v, j, k] = grad[k]
@@ -166,8 +170,7 @@ def solve_grad_hess (
     gradients: wp.array3d(dtype=wp.float64),
     hessians: wp.array4d(dtype=wp.float64),
 
-    dx: wp.array2d(dtype=wp.float64),
-    residuals: wp.array2d(dtype=wp.float64)
+    dx: wp.array2d(dtype=wp.float64)
 ) -> None:
     i = wp.tid()
 
@@ -180,14 +183,9 @@ def solve_grad_hess (
     # Solve for dx
     L = wp.tile_cholesky(total_hess)
     out = wp.tile_cholesky_solve(L, -total_grad)
-    residual = wp.tile_reshape(
-        wp.tile_matmul(total_hess, wp.tile_reshape(out, (3, 1))),
-        (3,)
-    ) + total_grad
     
     # Store results
     wp.tile_store(dx[i], out)
-    wp.tile_store(residuals[i], residual)
     
 
 
@@ -267,7 +265,8 @@ class VBDSolver:
             gravity: Gravity vector.
         """
         self.initial_positions = initial_positions
-        self.old_positions = wp.clone(initial_positions) # For velocities computation
+        self.old_positions = wp.clone(initial_positions) # For kinetic energy
+        self.old_velocities = wp.zeros_like(initial_positions)
         self.elements = elements
         self.adj_v2e = adj_v2e
         self.color_groups = color_groups
@@ -314,8 +313,6 @@ class VBDSolver:
 
         self.dDs_dx = wp.array(dDs_dx, dtype=wp.mat33d)
 
-        # breakpoint()
-
 
     def step (
         self, 
@@ -335,11 +332,8 @@ class VBDSolver:
         n_vertices = positions.shape[0]
         new_positions = wp.clone(positions)
 
-        MAX_ITER = 10
+        MAX_ITER = 20
         for _ in range(MAX_ITER):
-            # Discretize velocities, implicit Euler
-            velocities = (new_positions - self.old_positions) / dt
-
             # TODO: Lot of memory use, optimization possible
             gradients = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3), dtype=wp.float64)
             hessians = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3, 3), dtype=wp.float64)
@@ -347,17 +341,16 @@ class VBDSolver:
             wp.launch(
                 accumulate_grad_hess,
                 dim=[self.color_groups.shape[0], self.color_groups.shape[1], self.adj_v2e.shape[1]],
-                inputs=[positions, velocities, self.inv_Dm, self.dDs_dx, self.masses, self.lame_mu, self.lame_lambda, self.gravity, dt, self.elements, self.adj_v2e, self.color_groups],
+                inputs=[new_positions, self.old_positions, self.old_velocities, self.inv_Dm, self.dDs_dx, self.masses, self.lame_mu, self.lame_lambda, self.gravity, dt, self.elements, self.adj_v2e, self.color_groups],
                 outputs=[gradients, hessians]
             )
             dx = wp.zeros((n_vertices, 3), dtype=wp.float64)
-            residuals = wp.zeros((n_vertices, 3), dtype=wp.float64)
             wp.launch_tiled(
                 solve_grad_hess,
                 dim=n_vertices,
                 block_dim=64,
                 inputs=[gradients, hessians],
-                outputs=[dx, residuals]
+                outputs=[dx]
             )
             wp.launch(
                 add_dx,
@@ -365,10 +358,13 @@ class VBDSolver:
                 inputs=[new_positions, dx],
                 outputs=[new_positions]
             )
-            print(f"Computed dx: {dx.numpy()}")
-            print(f"Residuals: {residuals.numpy()}")
-            breakpoint()
+            print(f"Computed dx: {abs(dx.numpy()).max()}")
 
+            if abs(dx.numpy()).max() < 1e-6:
+                break
+
+        # Discretize velocities, implicit Euler
+        self.old_velocities = (new_positions - positions) / dt
         # Set old positions for next velocities computation
         self.old_positions = new_positions
 

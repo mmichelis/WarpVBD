@@ -94,9 +94,9 @@ def main (args):
     elements = wp.array(elements, dtype=wp.vec4i)
     adj_v2e = wp.array(adj_v2e, dtype=wp.int32)
     colors = wp.array(colors, dtype=wp.int32)
-    masses = wp.array(np.ones((num_vertices,), dtype=np.float64), dtype=wp.float64)  # Uniform masses for simplicity
-    n_timesteps = 10
-    dt = 1e-2
+    masses = wp.array(0.01 * np.ones((num_vertices,), dtype=np.float64), dtype=wp.float64)  # Uniform masses for simplicity
+    n_timesteps = 50
+    dt = 5e-3
 
     solver = vbd_solver.VBDSolver(
         initial_positions=solution,
@@ -111,7 +111,7 @@ def main (args):
         start_time = time.time()
         solution = solver.step(solution, wp.float64(dt))
         end_time = time.time()
-        print(f"Timestep {t*dt:.4f} in {1e3*(end_time - start_time):.3f}ms: Mean Positions: {solution.numpy().mean(axis=0)}")
+        print(f"---------- Timestep {t*dt:.4f} in {1e3*(end_time - start_time):.3f}ms: Mean Positions: {solution.numpy().mean(axis=0)}")
 
         render(solution.numpy(), elements.numpy(), filename=f"outputs/sim/vbd_simulation.pbrt_{t:03d}.png", spp=4)
 
