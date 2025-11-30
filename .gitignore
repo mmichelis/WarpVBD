@@ -1,6 +1,7 @@
 __pycache__/*
 
 outputs/*
+.tmp/*
 
 *.png
 *.mp4
