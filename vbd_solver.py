@@ -7,51 +7,35 @@ EPS = 1e-12
 MAX_ELEMENTS_PER_VERTEX = 128
 
 @wp.func
-def compute_gradient (
+def compute_gradient_hessian (
     vertex_idx: wp.int32,
     ele_idx: wp.int32,
     positions: wp.array(dtype=wp.vec3d),
     velocities: wp.array(dtype=wp.vec3d),
     masses: wp.array(dtype=wp.float64),
+    gravity: wp.vec3d,
     dt: wp.float64,
     elements: wp.array(dtype=wp.vec4i)
-) -> wp.vec3d:
+) -> tuple[wp.vec3d, wp.mat33d]:
     """
-    Compute the gradient of the energy with respect to vertex positions of a specific element.
+    Compute the gradient and hessian of the energy with respect to vertex positions of a specific element.
     """
     x = positions[vertex_idx]
     v = velocities[vertex_idx]
     m = masses[vertex_idx]
 
     gradient = wp.vec3d()
+    hessian = wp.mat33d()
     # Kinetic
     y = x + dt * v # + external accelerations, if any. TODO
     gradient += m  / (dt * dt) * (x - y)
-    
-    return gradient
-
-@wp.func
-def compute_hessian (
-    vertex_idx: wp.int32,
-    ele_idx: wp.int32,
-    positions: wp.array(dtype=wp.vec3d),
-    velocities: wp.array(dtype=wp.vec3d),
-    masses: wp.array(dtype=wp.float64),
-    dt: wp.float64,
-    elements: wp.array(dtype=wp.vec4i)
-) -> wp.mat33d:
-    """
-    Compute the Hessian of the energy with respect to vertex positions of a specific element.
-    """
-    x = positions[vertex_idx]
-    v = velocities[vertex_idx]
-    m = masses[vertex_idx]
-
-    hessian = wp.mat33d()
-    # Kinetic
     hessian += m / (dt * dt) * wp.identity(3, dtype=wp.float64)
 
-    return hessian
+    # Gravity
+    gradient += m * gravity
+    # no hessian
+    
+    return gradient, hessian
 
 
 @wp.kernel
@@ -59,6 +43,7 @@ def accumulate_grad_hess (
     positions: wp.array(dtype=wp.vec3d),
     velocities: wp.array(dtype=wp.vec3d),
     masses: wp.array(dtype=wp.float64),
+    gravity: wp.vec3d,
     dt: wp.float64,
     elements: wp.array(dtype=wp.vec4i),
     adj_v2e: wp.array2d(dtype=wp.int32),
@@ -73,6 +58,9 @@ def accumulate_grad_hess (
     Inputs:
         positions: Current vertex positions.
         velocities: Current vertex velocities.
+        masses: Vertex masses.
+        gravity: Gravity vector.
+        dt: Time step size.
         elements: Mesh elements.
         adj_v2e: Adjacency mapping from vertex to neighboring elements.
         color_groups: Color assignments for vertices.
@@ -90,8 +78,7 @@ def accumulate_grad_hess (
     if idx_v == -1 or idx_e == -1:
         return
     
-    grad = compute_gradient(idx_v, idx_e, positions, velocities, masses, dt, elements)
-    hess = compute_hessian(idx_v, idx_e, positions, velocities, masses, dt, elements)
+    grad, hess = compute_gradient_hessian(idx_v, idx_e, positions, velocities, masses, gravity, dt, elements)
 
     for k in range(3):
         gradients[idx_v, j, k] = grad[k]
@@ -140,7 +127,8 @@ class VBDSolver:
             elements: wp.array(dtype=wp.vec4i),
             adj_v2e: wp.array(dtype=wp.int32),
             color_groups: wp.array(dtype=wp.int32),
-            masses: wp.array(dtype=wp.float64)
+            masses: wp.array(dtype=wp.float64),
+            gravity: wp.vec3d = wp.vec3d(0.0, 0.0, -9.81),
         ) -> None:
         """
         Initialize the VBD solver with the mesh and simulation parameters.
@@ -150,6 +138,7 @@ class VBDSolver:
             adj_v2e: Adjacency mapping from vertex to neighboring elements.
             color_groups: Color assignments for vertices.
             masses: Masses of the vertices.
+            gravity: Gravity vector.
         """
         self.initial_positions = initial_positions
         self.old_positions = wp.clone(initial_positions) # For velocities computation
@@ -157,6 +146,7 @@ class VBDSolver:
         self.adj_v2e = adj_v2e
         self.color_groups = color_groups
         self.masses = masses
+        self.gravity = gravity
 
 
     def step (
@@ -186,7 +176,7 @@ class VBDSolver:
         wp.launch(
             accumulate_grad_hess,
             dim=[self.color_groups.shape[0], self.color_groups.shape[1], self.adj_v2e.shape[1]],
-            inputs=[positions, velocities, self.masses, dt, self.elements, self.adj_v2e, self.color_groups],
+            inputs=[positions, velocities, self.masses, self.gravity, dt, self.elements, self.adj_v2e, self.color_groups],
             outputs=[gradients, hessians]
         )
         dx = wp.zeros((n_vertices, 3), dtype=wp.float64)
