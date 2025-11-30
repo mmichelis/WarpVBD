@@ -103,7 +103,9 @@ def main (args):
         elements=elements,
         adj_v2e=adj_v2e,
         color_groups=colors,
-        masses=masses
+        masses=masses,
+        youngs_modulus=1e5,
+        poisson_ratio=0.3
     )
     for t in range(n_timesteps):
         start_time = time.time()

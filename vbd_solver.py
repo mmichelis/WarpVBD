@@ -6,6 +6,7 @@ import warp as wp
 EPS = 1e-12
 MAX_ELEMENTS_PER_VERTEX = 128
 
+
 @wp.func
 def compute_gradient_hessian (
     vertex_idx: wp.int32,
@@ -43,7 +44,7 @@ def compute_gradient_hessian (
         x2 - x3
     )
     F = Ds * inv_D
-    volume = wp.abs(wp.determinant(Ds)) / wp.float64(6.0) # TODO: could be optimized, or we precompute.
+    volume = wp.float64(1.0) / (wp.abs(wp.determinant(inv_D)) * wp.float64(6.0)) # TODO: could be optimized, or we precompute.
 
     ### Create derivatives of Ds after positions (constants)
     dF_dx = wp.zeros(shape=(3,), dtype=wp.mat33d) # shape should technically be 9x3, but we can store as 3 mat33d for simplicity
@@ -77,7 +78,20 @@ def compute_gradient_hessian (
 
     J = wp.determinant(F)
     Ic = wp.trace(F * wp.transpose(F))
-    dPhi_dF = (mu * F * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) + lmbda * (J - alpha) * J * wp.transpose(wp.inverse(F)))
+    Finv = wp.inverse(F)
+    FinvT = wp.transpose(Finv)
+    dPhi_dF = (mu * F * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) + lmbda * (J - alpha) * J * FinvT)
+    # Hessian has a complex form, we break it down to dF^T A dF, where A is 9 separate 3x3 blocks being the second derivative dPhi_dF2, each having 4 terms
+    dPhi_dF2 = wp.zeros((9,), dtype=wp.mat33d)
+    for i in range(3):
+        for j in range(3):
+            mask = wp.float64(i == j)
+            dPhi_dF2[3*i+j] = (
+                mask * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) * mu * wp.identity(3, dtype=wp.float64)
+                + (wp.float64(2.0) * J - alpha) * lmbda * J * (wp.outer(FinvT[i], FinvT[j]))
+                - lmbda * (J - alpha) * J * (wp.outer(FinvT[j], FinvT[i]))
+                + wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0))) * (wp.outer(F[i], F[j]))
+            )
 
     # Sum up all contributions
     for i in range(3):
@@ -85,7 +99,8 @@ def compute_gradient_hessian (
             gradient[0] += volume * dPhi_dF[i, j] * dF_dx[0][i, j]
             gradient[1] += volume * dPhi_dF[i, j] * dF_dx[1][i, j]
             gradient[2] += volume * dPhi_dF[i, j] * dF_dx[2][i, j]
-    
+
+            hessian += volume * wp.transpose(dF_dx[i]) * dPhi_dF2[3*i + j] * dF_dx[j]
 
     return gradient, hessian
 
@@ -252,11 +267,14 @@ class VBDSolver:
         self.gravity = gravity
     
         # If Lame parameters are not provided, compute them from Young's modulus and Poisson's ratio
-        if (lame_mu == 0.0 and lame_lambda == 0.0) and (youngs_modulus != 0.0 and poisson_ratio < 0.5):
+        if (wp.abs(lame_mu) == 0.0 and wp.abs(lame_lambda) == 0.0) and (wp.abs(youngs_modulus) == 0.0 or wp.abs(poisson_ratio) >= 0.5):
+            assert False, "Provide either Lame parameters or valid Young's modulus and Poisson's ratio!"
+        elif wp.abs(lame_mu) == 0.0 and wp.abs(lame_lambda) == 0.0:
             lame_mu = youngs_modulus / (2.0 * (1.0 + poisson_ratio))
             lame_lambda = (youngs_modulus * poisson_ratio) / ((1.0 + poisson_ratio) * (1.0 - 2.0 * poisson_ratio))
         self.lame_mu = lame_mu
         self.lame_lambda = lame_lambda
+
 
         ### Compute inverted undeformed/reference shape matrix for tetrahedrons.
         n_elements = elements.shape[0]
@@ -288,6 +306,8 @@ class VBDSolver:
 
         self.dDs_dx = wp.array(dDs_dx, dtype=wp.mat33d)
 
+        # breakpoint()
+
 
     def step (
         self, 
@@ -305,37 +325,41 @@ class VBDSolver:
             Updated vertex positions after the time step. Does not overwrite the input positions.
         """
         n_vertices = positions.shape[0]
+        new_positions = wp.clone(positions)
 
-        # Discretize velocities, implicit Euler
-        velocities = (positions - self.old_positions) / dt
+        MAX_ITER = 10
+        for _ in range(MAX_ITER):
+            # Discretize velocities, implicit Euler
+            velocities = (new_positions - self.old_positions) / dt
 
-        # TODO: Lot of memory use, optimization possible
-        gradients = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3), dtype=wp.float64)
-        hessians = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3, 3), dtype=wp.float64)
+            # TODO: Lot of memory use, optimization possible
+            gradients = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3), dtype=wp.float64)
+            hessians = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3, 3), dtype=wp.float64)
 
-        wp.launch(
-            accumulate_grad_hess,
-            dim=[self.color_groups.shape[0], self.color_groups.shape[1], self.adj_v2e.shape[1]],
-            inputs=[positions, velocities, self.inv_Dm, self.dDs_dx, self.masses, self.lame_mu, self.lame_lambda, self.gravity, dt, self.elements, self.adj_v2e, self.color_groups],
-            outputs=[gradients, hessians]
-        )
-        dx = wp.zeros((n_vertices, 3), dtype=wp.float64)
-        wp.launch_tiled(
-            solve_grad_hess,
-            dim=n_vertices,
-            block_dim=64,
-            inputs=[gradients, hessians],
-            outputs=[dx]
-        )
-        new_positions = wp.zeros_like(positions)
-        wp.launch(
-            add_dx,
-            dim=n_vertices,
-            inputs=[positions, dx],
-            outputs=[new_positions]
-        )
+            wp.launch(
+                accumulate_grad_hess,
+                dim=[self.color_groups.shape[0], self.color_groups.shape[1], self.adj_v2e.shape[1]],
+                inputs=[positions, velocities, self.inv_Dm, self.dDs_dx, self.masses, self.lame_mu, self.lame_lambda, self.gravity, dt, self.elements, self.adj_v2e, self.color_groups],
+                outputs=[gradients, hessians]
+            )
+            dx = wp.zeros((n_vertices, 3), dtype=wp.float64)
+            wp.launch_tiled(
+                solve_grad_hess,
+                dim=n_vertices,
+                block_dim=64,
+                inputs=[gradients, hessians],
+                outputs=[dx]
+            )
+            wp.launch(
+                add_dx,
+                dim=n_vertices,
+                inputs=[new_positions, dx],
+                outputs=[new_positions]
+            )
+            print(f"Computed dx: {dx.numpy()}")
+
         # Set old positions for next velocities computation
-        self.old_positions = positions
+        self.old_positions = new_positions
 
         # Check if nan because hessian singlar TODO
         # print(f"All not nan: {wp.isnan(new_positions)}")
