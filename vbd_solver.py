@@ -112,16 +112,21 @@ def accumulate_grad_hess (
     positions: wp.array(dtype=wp.vec3d),
     old_positions: wp.array(dtype=wp.vec3d),
     old_velocities: wp.array(dtype=wp.vec3d),
+
     inv_Dm: wp.array(dtype=wp.mat33d),
     dDs_dx: wp.array2d(dtype=wp.mat33d),
+
     masses: wp.array(dtype=wp.float64),
     lame_mu: wp.float64,
     lame_lambda: wp.float64,
+
     gravity: wp.vec3d,
     dt: wp.float64,
+
     elements: wp.array(dtype=wp.vec4i),
     adj_v2e: wp.array2d(dtype=wp.int32),
     color_groups: wp.array2d(dtype=wp.int32),
+    active_mask: wp.array(dtype=wp.bool),
 
     gradients: wp.array3d(dtype=wp.float64),
     hessians: wp.array4d(dtype=wp.float64)
@@ -133,16 +138,21 @@ def accumulate_grad_hess (
         positions: Current vertex positions.
         old_positions: Previous vertex positions.
         old_velocities: Previous vertex velocities.
+
         inv_Dm: Inverted undeformed shape matrices for elements.
         dDs_dx: Derivatives of Ds with respect to positions. Shape [4, 3, 3, 3], a 3x3 matrix for each vertex of the tetrahedron.
+
         masses: Element masses.
         lame_mu: Lame parameter mu.
         lame_lambda: Lame parameter lambda.
+
         gravity: Gravity vector.
         dt: Time step size.
+
         elements: Mesh elements.
         adj_v2e: Adjacency mapping from vertex to neighboring elements.
         color_groups: Color assignments for vertices.
+        active_mask: Mask indicating active vertices.
     
     Outputs:
         gradients: Output array for gradients of every element of each vertex.
@@ -150,11 +160,16 @@ def accumulate_grad_hess (
     """
     c, i, j = wp.tid()
 
-    idx_v = color_groups[c, i]
-    idx_e = adj_v2e[idx_v, j]
-    
     # Skip if this is a padding entry
-    if idx_v == -1 or idx_e == -1:
+    idx_v = color_groups[c, i]
+    if idx_v == -1:
+        return
+    idx_e = adj_v2e[idx_v, j]
+    if idx_e == -1:
+        return
+    
+    # Skip if vertex is not active
+    if not active_mask[idx_v]:
         return
     
     grad, hess = compute_gradient_hessian(idx_v, idx_e, positions, old_positions, old_velocities, inv_Dm, dDs_dx, masses, lame_mu, lame_lambda, gravity, dt, elements)
@@ -165,15 +180,21 @@ def accumulate_grad_hess (
             hessians[idx_v, j, k, l] = hess[k, l]
 
 
+
 @wp.kernel
 def solve_grad_hess (
     gradients: wp.array3d(dtype=wp.float64),
     hessians: wp.array4d(dtype=wp.float64),
+    active_mask: wp.array(dtype=wp.bool),
 
     dx: wp.array2d(dtype=wp.float64)
 ) -> None:
     i = wp.tid()
 
+    # Skip if vertex is not active
+    if not active_mask[i]:
+        return
+    
     grad = wp.tile_load(gradients[i], (MAX_ELEMENTS_PER_VERTEX, 3))
     hess = wp.tile_load(hessians[i], (MAX_ELEMENTS_PER_VERTEX, 3, 3))
     # Sum up contributions of elements to vertices
@@ -248,6 +269,7 @@ class VBDSolver:
             youngs_modulus: wp.float64 = wp.float64(0.0),
             poisson_ratio: wp.float64 = wp.float64(0.5),
 
+            active_mask: wp.array(dtype=wp.bool)=None,
             gravity: wp.vec3d = wp.vec3d(0.0, 0.0, -9.81),
         ) -> None:
         """
@@ -257,12 +279,15 @@ class VBDSolver:
             elements: Mesh elements.
             adj_v2e: Adjacency mapping from vertex to neighboring elements.
             color_groups: Color assignments for vertices.
+
             masses: Mass if each tetrahedral element.
             lame_mu: Lame parameter mu.
             lame_lambda: Lame parameter lambda.
             youngs_modulus: Young's modulus (not used if Lame parameters are provided).
             poisson_ratio: Poisson's ratio (not used if Lame parameters are provided).
+
             gravity: Gravity vector.
+            active_mask: Optional mask to indicate active vertices.
         """
         self.initial_positions = initial_positions
         self.old_positions = wp.clone(initial_positions) # For kinetic energy
@@ -272,6 +297,10 @@ class VBDSolver:
         self.color_groups = color_groups
         self.masses = masses
         self.gravity = gravity
+        if active_mask is not None:
+            self.active_mask = active_mask
+        else:
+            self.active_mask = wp.ones(initial_positions.shape[0], dtype=wp.bool)
     
         # If Lame parameters are not provided, compute them from Young's modulus and Poisson's ratio
         if (wp.abs(lame_mu) == 0.0 and wp.abs(lame_lambda) == 0.0) and (wp.abs(youngs_modulus) == 0.0 or wp.abs(poisson_ratio) >= 0.5):
@@ -330,6 +359,9 @@ class VBDSolver:
             Updated vertex positions after the time step. Does not overwrite the input positions.
         """
         n_vertices = positions.shape[0]
+        n_colors = self.color_groups.shape[0]
+        n_vertices_per_color = self.color_groups.shape[1]
+        n_elements_per_vertex = self.adj_v2e.shape[1]
         new_positions = wp.clone(positions)
 
         MAX_ITER = 100
@@ -340,8 +372,8 @@ class VBDSolver:
 
             wp.launch(
                 accumulate_grad_hess,
-                dim=[self.color_groups.shape[0], self.color_groups.shape[1], self.adj_v2e.shape[1]],
-                inputs=[new_positions, self.old_positions, self.old_velocities, self.inv_Dm, self.dDs_dx, self.masses, self.lame_mu, self.lame_lambda, self.gravity, dt, self.elements, self.adj_v2e, self.color_groups],
+                dim=[n_colors, n_vertices_per_color, n_elements_per_vertex],
+                inputs=[new_positions, self.old_positions, self.old_velocities, self.inv_Dm, self.dDs_dx, self.masses, self.lame_mu, self.lame_lambda, self.gravity, dt, self.elements, self.adj_v2e, self.color_groups, self.active_mask],
                 outputs=[gradients, hessians]
             )
             dx = wp.zeros((n_vertices, 3), dtype=wp.float64)
@@ -349,7 +381,7 @@ class VBDSolver:
                 solve_grad_hess,
                 dim=n_vertices,
                 block_dim=64,
-                inputs=[gradients, hessians],
+                inputs=[gradients, hessians, self.active_mask],
                 outputs=[dx]
             )
             wp.launch(
@@ -364,7 +396,6 @@ class VBDSolver:
 
         print(f"Final dx in {i} iterations: {abs(dx.numpy()).max()}")
 
-
         # Discretize velocities, implicit Euler
         self.old_velocities = (new_positions - positions) / dt
         # Set old positions for next velocities computation
@@ -372,10 +403,6 @@ class VBDSolver:
 
         # Check if nan because hessian singlar TODO
         # print(f"All not nan: {wp.isnan(new_positions)}")
-        
-        # print(f"Old positions: {positions.numpy()}")
-        # print(f"Computed dx: {dx.numpy()}")
-        # print(f"New positions: {new_positions.numpy()}")
 
         return new_positions
 

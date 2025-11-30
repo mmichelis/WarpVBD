@@ -44,6 +44,13 @@ def main (args):
     tet_indices = elements.flatten().tolist()
     print(f"Generated tetrahedral mesh with {len(points)} vertices and {len(elements)} elements.")
 
+    # Set active mask
+    active_mask = np.ones((vertices.shape[0],), dtype=bool)
+    for i in range(vertices.shape[0]):
+        if vertices[i,0] < 1e-3:
+            active_mask[i] = False
+    print(f"Active vertices: {np.sum(active_mask)}/{vertices.shape[0]}")
+
     ### Perform graph coloring
     start_time = time.time()
     adjacency, maximal_degree = compute_adjacency_dict(elements)
@@ -94,11 +101,12 @@ def main (args):
     elements = wp.array(elements, dtype=wp.vec4i)
     adj_v2e = wp.array(adj_v2e, dtype=wp.int32)
     colors = wp.array(colors, dtype=wp.int32)
-    masses = wp.array(0.01 * np.ones((num_vertices,), dtype=np.float64), dtype=wp.float64)  # Uniform masses for simplicity
+    active_mask = wp.array(active_mask, dtype=wp.bool)
+    masses = wp.array(0.001 * np.ones((num_elements,), dtype=np.float64), dtype=wp.float64)  # Uniform masses for simplicity
     n_seconds = 1.0
     fps = 30
     n_timesteps = int(n_seconds * fps)
-    n_substeps = 40
+    n_substeps = 100
     dt = 1/fps/n_substeps
     print(f"Simulating {n_seconds}s of dynamics in {n_timesteps} timesteps of {n_substeps} substeps each (dt={dt:.6f}s).")
 
@@ -109,7 +117,8 @@ def main (args):
         color_groups=colors,
         masses=masses,
         youngs_modulus=1e5,
-        poisson_ratio=0.3
+        poisson_ratio=0.4,
+        active_mask=active_mask
     )
     for t in range(n_timesteps):
         start_time = time.time()
