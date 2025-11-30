@@ -102,7 +102,7 @@ def main (args):
     adj_v2e = wp.array(adj_v2e, dtype=wp.int32)
     colors = wp.array(colors, dtype=wp.int32)
     active_mask = wp.array(active_mask, dtype=wp.bool)
-    masses = wp.array(0.001 * np.ones((num_elements,), dtype=np.float64), dtype=wp.float64)  # Uniform masses for simplicity
+    densities = wp.array(1000 * np.ones(num_elements), dtype=wp.float64)  # Uniform density
     n_seconds = 1.0
     fps = 30
     n_timesteps = int(n_seconds * fps)
@@ -115,7 +115,7 @@ def main (args):
         elements=elements,
         adj_v2e=adj_v2e,
         color_groups=colors,
-        masses=masses,
+        densities=densities,
         youngs_modulus=1e5,
         poisson_ratio=0.4,
         active_mask=active_mask

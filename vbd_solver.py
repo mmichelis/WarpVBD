@@ -224,6 +224,46 @@ def add_dx (
 
 
 @wp.kernel
+def compute_vertex_masses (
+    positions: wp.array(dtype=wp.vec3d),
+    elements: wp.array(dtype=wp.vec4i),
+    densities: wp.array(dtype=wp.float64),
+
+    masses: wp.array(dtype=wp.float64)
+) -> None:
+    """
+    Compute mass per vertex from element densities.
+
+    Args:
+        positions: Vertex positions.
+        elements: Mesh elements.
+        densities: Element densities.
+        masses: Output array for vertex masses.
+    """
+    i = wp.tid()
+
+    ele = elements[i]
+    density = densities[i]
+
+    # Compute volume
+    x0 = positions[ele[0]]
+    x1 = positions[ele[1]]
+    x2 = positions[ele[2]]
+    x3 = positions[ele[3]]
+    Dm = wp.matrix_from_cols(
+        x0 - x3,
+        x1 - x3,
+        x2 - x3
+    )
+    volume = wp.abs(wp.determinant(Dm)) / wp.float64(6.0)
+    mass = density * volume
+
+    # Distribute mass equally to the four vertices, TODO: INEFFICIENT, CHANGE TO TILES
+    for k in range(4):
+        wp.atomic_add(masses, ele[k], mass / wp.float64(4.0))
+
+
+@wp.kernel
 def compute_inv_Dm (
     positions: wp.array(dtype=wp.vec3d),
     elements: wp.array(dtype=wp.vec4i),
@@ -263,7 +303,7 @@ class VBDSolver:
             adj_v2e: wp.array(dtype=wp.int32),
             color_groups: wp.array(dtype=wp.int32),
 
-            masses: wp.array(dtype=wp.float64),
+            densities: wp.array(dtype=wp.float64),
             lame_mu: wp.float64 = wp.float64(0.0),
             lame_lambda: wp.float64 = wp.float64(0.0),
             youngs_modulus: wp.float64 = wp.float64(0.0),
@@ -280,7 +320,7 @@ class VBDSolver:
             adj_v2e: Adjacency mapping from vertex to neighboring elements.
             color_groups: Color assignments for vertices.
 
-            masses: Mass if each tetrahedral element.
+            densities: Element densities.
             lame_mu: Lame parameter mu.
             lame_lambda: Lame parameter lambda.
             youngs_modulus: Young's modulus (not used if Lame parameters are provided).
@@ -295,7 +335,7 @@ class VBDSolver:
         self.elements = elements
         self.adj_v2e = adj_v2e
         self.color_groups = color_groups
-        self.masses = masses
+        self.densities = densities
         self.gravity = gravity
         if active_mask is not None:
             self.active_mask = active_mask
@@ -312,8 +352,17 @@ class VBDSolver:
         self.lame_lambda = lame_lambda
 
 
-        ### Compute inverted undeformed/reference shape matrix for tetrahedrons.
+        ### Compute mass per vertex from element densities
         n_elements = elements.shape[0]
+        self.masses = wp.zeros(initial_positions.shape[0], dtype=wp.float64)
+        wp.launch(
+            compute_vertex_masses,
+            dim=n_elements,
+            inputs=[initial_positions, elements, densities],
+            outputs=[self.masses]
+        )
+
+        ### Compute inverted undeformed/reference shape matrix for tetrahedrons.
         self.inv_Dm = wp.zeros(n_elements, dtype=wp.mat33d)
         wp.launch(
             compute_inv_Dm,
@@ -390,9 +439,12 @@ class VBDSolver:
                 inputs=[new_positions, dx],
                 outputs=[new_positions]
             )
-
+            breakpoint()
             if abs(dx.numpy()).max() < 1e-6:
                 break
+        
+        if i == MAX_ITER - 1:
+            print("Warning: VBD solver did not converge within the maximum number of iterations.")
 
         print(f"Final dx in {i} iterations: {abs(dx.numpy()).max()}")
 
