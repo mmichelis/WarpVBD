@@ -167,6 +167,7 @@ def solve_grad_hess (
     hessians: wp.array4d(dtype=wp.float64),
 
     dx: wp.array2d(dtype=wp.float64),
+    residuals: wp.array2d(dtype=wp.float64)
 ) -> None:
     i = wp.tid()
 
@@ -178,8 +179,15 @@ def solve_grad_hess (
 
     # Solve for dx
     L = wp.tile_cholesky(total_hess)
-    res = wp.tile_cholesky_solve(L, -total_grad)
-    wp.tile_store(dx[i], res)
+    out = wp.tile_cholesky_solve(L, -total_grad)
+    residual = wp.tile_reshape(
+        wp.tile_matmul(total_hess, wp.tile_reshape(out, (3, 1))),
+        (3,)
+    ) + total_grad
+    
+    # Store results
+    wp.tile_store(dx[i], out)
+    wp.tile_store(residuals[i], residual)
     
 
 
@@ -343,12 +351,13 @@ class VBDSolver:
                 outputs=[gradients, hessians]
             )
             dx = wp.zeros((n_vertices, 3), dtype=wp.float64)
+            residuals = wp.zeros((n_vertices, 3), dtype=wp.float64)
             wp.launch_tiled(
                 solve_grad_hess,
                 dim=n_vertices,
                 block_dim=64,
                 inputs=[gradients, hessians],
-                outputs=[dx]
+                outputs=[dx, residuals]
             )
             wp.launch(
                 add_dx,
@@ -357,6 +366,8 @@ class VBDSolver:
                 outputs=[new_positions]
             )
             print(f"Computed dx: {dx.numpy()}")
+            print(f"Residuals: {residuals.numpy()}")
+            breakpoint()
 
         # Set old positions for next velocities computation
         self.old_positions = new_positions
