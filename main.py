@@ -95,8 +95,12 @@ def main (args):
     adj_v2e = wp.array(adj_v2e, dtype=wp.int32)
     colors = wp.array(colors, dtype=wp.int32)
     masses = wp.array(0.01 * np.ones((num_vertices,), dtype=np.float64), dtype=wp.float64)  # Uniform masses for simplicity
-    n_timesteps = 50
-    dt = 5e-3
+    n_seconds = 1.0
+    fps = 30
+    n_timesteps = int(n_seconds * fps)
+    n_substeps = 40
+    dt = 1/fps/n_substeps
+    print(f"Simulating {n_seconds}s of dynamics in {n_timesteps} timesteps of {n_substeps} substeps each (dt={dt:.6f}s).")
 
     solver = vbd_solver.VBDSolver(
         initial_positions=solution,
@@ -109,14 +113,17 @@ def main (args):
     )
     for t in range(n_timesteps):
         start_time = time.time()
-        solution = solver.step(solution, wp.float64(dt))
+
+        for i in range(n_substeps):
+            solution = solver.step(solution, wp.float64(dt))
+
         end_time = time.time()
-        print(f"---------- Timestep {t*dt:.4f} in {1e3*(end_time - start_time):.3f}ms: Mean Positions: {solution.numpy().mean(axis=0)}")
+        print(f"---Timestep [{t:04d}/{n_timesteps}] ({1e3*dt*n_substeps:.1f}ms) in {1e3*(end_time - start_time):.3f}ms: Mean Positions: {solution.numpy().mean(axis=0)}")
 
         render(solution.numpy(), elements.numpy(), filename=f"outputs/sim/vbd_simulation.pbrt_{t:03d}.png", spp=4)
 
     # Render mp4
-    export_mp4("outputs/sim/", "outputs/vbd_simulation.mp4", fps=50)
+    export_mp4("outputs/sim/", "outputs/vbd_simulation.mp4", fps=fps)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

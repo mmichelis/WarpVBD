@@ -332,8 +332,8 @@ class VBDSolver:
         n_vertices = positions.shape[0]
         new_positions = wp.clone(positions)
 
-        MAX_ITER = 20
-        for _ in range(MAX_ITER):
+        MAX_ITER = 100
+        for i in range(MAX_ITER):
             # TODO: Lot of memory use, optimization possible
             gradients = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3), dtype=wp.float64)
             hessians = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3, 3), dtype=wp.float64)
@@ -358,10 +358,12 @@ class VBDSolver:
                 inputs=[new_positions, dx],
                 outputs=[new_positions]
             )
-            print(f"Computed dx: {abs(dx.numpy()).max()}")
 
             if abs(dx.numpy()).max() < 1e-6:
                 break
+
+        print(f"Final dx in {i} iterations: {abs(dx.numpy()).max()}")
+
 
         # Discretize velocities, implicit Euler
         self.old_velocities = (new_positions - positions) / dt
