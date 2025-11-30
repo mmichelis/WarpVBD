@@ -7,9 +7,32 @@ import argparse
 import time
 
 from _utils import voxel2hex, hex2tets
+from _renderer import PbrtRenderer, export_mp4
 from coloring import graph_coloring, compute_adjacency_dict
 import vbd_solver
 
+
+def render (vertices, elements, filename=None, spp=4):
+    """
+    Short rendering script for tetrahedral meshes using PBRT.
+    """
+    options = {
+        'file_name': filename,
+        'light_map': 'uffizi-large.exr',
+        'sample': spp,
+        'max_depth': 2,
+        'camera_pos': (0.1, -0.75, 0.5),   # Position of camera
+        'camera_lookat': (0.1, 0.25, 0.25),     # Position that camera looks at
+    }
+    transforms=[
+        ('s', 1.0),
+        ('t', [0, 0, 0.3])
+    ]
+    renderer = PbrtRenderer(options)
+
+    renderer.add_tri_mesh(vertices=vertices, elements=elements, render_edges=True, color="496d8a", transforms=transforms)
+    renderer.add_tri_mesh(objFile='asset/mesh/curved_ground.obj', texture_img='chkbd_24_0.7', transforms=[('s', 4)])
+    renderer.render()
 
 
 def main (args):
@@ -83,17 +106,22 @@ def main (args):
         masses=masses
     )
     for t in range(n_timesteps):
+        start_time = time.time()
         solution = solver.step(solution, wp.float64(dt))
-        print(f"Timestep {t*dt:.4f}: Mean Positions: {solution.numpy().mean(axis=0)}")
+        end_time = time.time()
+        print(f"Timestep {t*dt:.4f} in {1e3*(end_time - start_time):.3f}ms: Mean Positions: {solution.numpy().mean(axis=0)}")
 
+        render(solution.numpy(), elements.numpy(), filename=f"outputs/sim/vbd_simulation.pbrt_{t:03d}.png", spp=4)
 
+    # Render mp4
+    export_mp4("outputs/sim/", "outputs/vbd_simulation.mp4", fps=50)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--nx", type=int, default=1, help="Number of voxels in x direction")
     parser.add_argument("--ny", type=int, default=1, help="Number of voxels in y direction")
     parser.add_argument("--nz", type=int, default=1, help="Number of voxels in z direction")
-    parser.add_argument("--dx", type=float, default=1.0, help="Voxel size in x direction")
+    parser.add_argument("--dx", type=float, default=0.1, help="Voxel size in x direction")
     parser.add_argument("--dy", type=float, default=None, help="Voxel size in y direction")
     parser.add_argument("--dz", type=float, default=None, help="Voxel size in z direction")
     parser.add_argument("--visualize", action='store_true', help="Visualize option")

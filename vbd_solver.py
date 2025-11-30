@@ -32,7 +32,7 @@ def compute_gradient_hessian (
     hessian += m / (dt * dt) * wp.identity(3, dtype=wp.float64)
 
     # Gravity
-    gradient += m * gravity
+    gradient += -m * gravity
     # no hessian
     
     return gradient, hessian
