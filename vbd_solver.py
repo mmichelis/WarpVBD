@@ -29,7 +29,7 @@ def compute_gradient_hessian (
     x = positions[vertex_idx]
     x_prev = old_positions[vertex_idx]
     v_prev = old_velocities[vertex_idx]
-    m = masses[ele_idx] * wp.float64(0.25) # Each vertex gets one-fourth of the element mass
+    m = masses[vertex_idx]
     ele = elements[ele_idx]
     inv_D = inv_Dm[ele_idx]
 
@@ -142,7 +142,7 @@ def accumulate_grad_hess (
         inv_Dm: Inverted undeformed shape matrices for elements.
         dDs_dx: Derivatives of Ds with respect to positions. Shape [4, 3, 3, 3], a 3x3 matrix for each vertex of the tetrahedron.
 
-        masses: Element masses.
+        masses: Vertex masses.
         lame_mu: Lame parameter mu.
         lame_lambda: Lame parameter lambda.
 
@@ -413,12 +413,12 @@ class VBDSolver:
         n_elements_per_vertex = self.adj_v2e.shape[1]
         new_positions = wp.clone(positions)
 
+        # TODO: Lot of memory use, optimization possible
+        gradients = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3), dtype=wp.float64)
+        hessians = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3, 3), dtype=wp.float64)
+
         MAX_ITER = 100
         for i in range(MAX_ITER):
-            # TODO: Lot of memory use, optimization possible
-            gradients = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3), dtype=wp.float64)
-            hessians = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3, 3), dtype=wp.float64)
-
             wp.launch(
                 accumulate_grad_hess,
                 dim=[n_colors, n_vertices_per_color, n_elements_per_vertex],
@@ -439,7 +439,7 @@ class VBDSolver:
                 inputs=[new_positions, dx],
                 outputs=[new_positions]
             )
-            breakpoint()
+
             if abs(dx.numpy()).max() < 1e-6:
                 break
         
