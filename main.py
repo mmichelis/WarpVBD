@@ -71,10 +71,20 @@ def main (args):
     elements = wp.array(elements, dtype=wp.vec4i)
     adj_v2e = wp.array(adj_v2e, dtype=wp.int32)
     colors = wp.array(colors, dtype=wp.int32)
+    masses = wp.array(np.ones((num_vertices,), dtype=np.float64), dtype=wp.float64)  # Uniform masses for simplicity
     n_timesteps = 10
-    dt = 1e-3
+    dt = 1e-2
+
+    solver = vbd_solver.VBDSolver(
+        initial_positions=solution,
+        elements=elements,
+        adj_v2e=adj_v2e,
+        color_groups=colors,
+        masses=masses
+    )
     for t in range(n_timesteps):
-        solution = vbd_solver.step(solution, elements, adj_v2e, colors, dt)
+        solution = solver.step(solution, wp.float64(dt))
+        print(f"Timestep {t*dt:.4f}: Mean Positions: {solution.numpy().mean(axis=0)}")
 
 
 
