@@ -6,6 +6,7 @@ import warp as wp
 EPS = 1e-12
 MAX_ELEMENTS_PER_VERTEX = 128
 
+DELTA = 1e-6
 
 @wp.func
 def compute_gradient_hessian (
@@ -22,11 +23,13 @@ def compute_gradient_hessian (
     gravity: wp.vec3d,
     dt: wp.float64,
     elements: wp.array(dtype=wp.vec4i)
-) -> tuple[wp.vec3d, wp.mat33d]:
+# ) -> tuple[wp.vec3d, wp.mat33d]:
+):
     """
     Compute the gradient and hessian of the energy with respect to vertex positions of a specific element.
     """
     x = positions[vertex_idx]
+    x_other = x + wp.vec3d(wp.float64(DELTA), wp.float64(0.0), wp.float64(0.0))  # For finite difference check
     x_prev = old_positions[vertex_idx]
     v_prev = old_velocities[vertex_idx]
     m = masses[vertex_idx]
@@ -39,13 +42,24 @@ def compute_gradient_hessian (
     x2 = positions[ele[2]]
     x3 = positions[ele[3]]
 
+    x0_other = x_other if vertex_idx == ele[0] else positions[ele[0]]
+    x1_other = x_other if vertex_idx == ele[1] else positions[ele[1]]
+    x2_other = x_other if vertex_idx == ele[2] else positions[ele[2]]
+    x3_other = x_other if vertex_idx == ele[3] else positions[ele[3]]
+
     # Deformed shape matrix # TODO write out matmul and skip mat33d initialization for performance
     Ds = wp.matrix_from_cols(
         x0 - x3,
         x1 - x3,
         x2 - x3
     )
+    Ds_other = wp.matrix_from_cols(
+        x0_other - x3_other,
+        x1_other - x3_other,
+        x2_other - x3_other
+    )
     F = Ds * inv_D
+    F_other = Ds_other * inv_D
     volume = wp.float64(1.0) / (wp.abs(wp.determinant(inv_D)) * wp.float64(6.0)) # TODO: could be optimized, or we precompute.
 
     ### Create derivatives of Ds after positions (constants)
@@ -62,15 +76,18 @@ def compute_gradient_hessian (
 
     ### Assemble gradient and hessian
     gradient = wp.vec3d()
+    gradient_other = wp.vec3d()  # For finite difference check
     hessian = wp.mat33d()
 
     # Kinetic
     y = x_prev + dt * v_prev # + external accelerations, if any. TODO
     gradient += m  / (dt * dt) * (x - y)
+    gradient_other += m  / (dt * dt) * (x_other - y)
     hessian += m / (dt * dt) * wp.identity(3, dtype=wp.float64)
 
     # Gravity
     gradient += -m * gravity
+    gradient_other += -m * gravity
     # no hessian
 
     # Elastic, stable Neo-hookean
@@ -79,13 +96,22 @@ def compute_gradient_hessian (
     alpha = wp.float64(1.0) + wp.float64(0.75) * mu / lmbda
 
     J = wp.determinant(F)
+    J_other = wp.determinant(F_other)
     Ic = wp.trace(F * wp.transpose(F))
+    Ic_other = wp.trace(F_other * wp.transpose(F_other))
     Finv = wp.inverse(F)
+    Finv_other = wp.inverse(F_other)
     FinvT = wp.transpose(Finv)
+    FinvT_other = wp.transpose(Finv_other)
     dPhi_dF = (
         mu * F * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) 
         + lmbda * (J - alpha) * J * FinvT
     )
+    dPhi_dF_other = (
+        mu * F_other * (wp.float64(1.0) - wp.float64(1.0) / (Ic_other + wp.float64(1.0))) 
+        + lmbda * (J_other - alpha) * J_other * FinvT_other
+    )
+        
 
     # Hessian has a complex form, we break it down to dF^T A dF, where A is 9 separate 3x3 blocks being the second derivative dPhi_dF2, each having 4 terms
     dPhi_dF2 = wp.zeros((9,), dtype=wp.mat33d)
@@ -106,11 +132,15 @@ def compute_gradient_hessian (
             gradient[1] += volume * dPhi_dF[i, j] * dF_dx[1][i, j]
             gradient[2] += volume * dPhi_dF[i, j] * dF_dx[2][i, j]
 
+            gradient_other[0] += volume * dPhi_dF_other[i, j] * dF_dx[0][i, j]
+            gradient_other[1] += volume * dPhi_dF_other[i, j] * dF_dx[1][i, j]
+            gradient_other[2] += volume * dPhi_dF_other[i, j] * dF_dx[2][i, j]
+
             for k in range(3):
                 for l in range(3):
                     hessian[i, j] += volume * wp.dot(wp.transpose(dF_dx[i])[k], dPhi_dF2[3*k+l] * wp.transpose(dF_dx[j])[l])
 
-    return gradient, hessian
+    return gradient, gradient_other, hessian
 
 
 @wp.kernel
@@ -135,6 +165,7 @@ def accumulate_grad_hess (
     active_mask: wp.array(dtype=wp.bool),
 
     gradients: wp.array3d(dtype=wp.float64),
+    gradients_other: wp.array3d(dtype=wp.float64),
     hessians: wp.array4d(dtype=wp.float64)
 ) -> None:
     """
@@ -177,11 +208,11 @@ def accumulate_grad_hess (
     # Skip if vertex is not active
     if not active_mask[idx_v]:
         return
-    
-    grad, hess = compute_gradient_hessian(idx_v, idx_e, positions, old_positions, old_velocities, inv_Dm, dDs_dx, masses, lame_mu, lame_lambda, gravity, dt, elements)
 
+    grad, grad_other, hess = compute_gradient_hessian(idx_v, idx_e, positions, old_positions, old_velocities, inv_Dm, dDs_dx, masses, lame_mu, lame_lambda, gravity, dt, elements)
     for k in range(3):
         gradients[idx_v, j, k] = grad[k]
+        gradients_other[idx_v, j, k] = grad_other[k]
         for l in range(3):
             hessians[idx_v, j, k, l] = hess[k, l]
 
@@ -420,8 +451,9 @@ class VBDSolver:
         new_positions = wp.clone(positions)
 
         # TODO: Lot of memory use, optimization possible
-        gradients = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3), dtype=wp.float64)
-        hessians = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3, 3), dtype=wp.float64)
+        gradients = wp.zeros((n_vertices, n_elements_per_vertex, 3), dtype=wp.float64)
+        gradients_other = wp.zeros((n_vertices, n_elements_per_vertex, 3), dtype=wp.float64)
+        hessians = wp.zeros((n_vertices, n_elements_per_vertex, 3, 3), dtype=wp.float64)
 
         MAX_ITER = 100
         for i in range(MAX_ITER):
@@ -429,7 +461,7 @@ class VBDSolver:
                 accumulate_grad_hess,
                 dim=[n_colors, n_vertices_per_color, n_elements_per_vertex],
                 inputs=[new_positions, self.old_positions, self.old_velocities, self.inv_Dm, self.dDs_dx, self.masses, self.lame_mu, self.lame_lambda, self.gravity, dt, self.elements, self.adj_v2e, self.color_groups, self.active_mask],
-                outputs=[gradients, hessians]
+                outputs=[gradients, gradients_other, hessians]
             )
             dx = wp.zeros((n_vertices, 3), dtype=wp.float64)
             wp.launch_tiled(
@@ -445,8 +477,8 @@ class VBDSolver:
                 inputs=[new_positions, dx],
                 outputs=[new_positions]
             )
-            # print(abs(dx.numpy()).max())
-            # breakpoint()
+            print(abs(dx.numpy()).max())
+            breakpoint()
             if abs(dx.numpy()).max() < 1e-6:
                 break
         
