@@ -76,13 +76,14 @@ def compute_gradient_hessian (
     # Elastic, stable Neo-hookean
     mu = wp.float64(4.0) * lame_mu / wp.float64(3.0)                    # Adjusted mu for stable Neo-Hookean
     lmbda = lame_lambda + wp.float64(5.0) * lame_mu / wp.float64(6.0)   # Adjusted lambda for stable Neo-Hookean
-    alpha = wp.float64(1.0) + wp.float64(0.75) * lame_mu / lame_lambda
+    alpha = wp.float64(1.0) + wp.float64(0.75) * mu / lmbda
 
     J = wp.determinant(F)
     Ic = wp.trace(F * wp.transpose(F))
     Finv = wp.inverse(F)
     FinvT = wp.transpose(Finv)
     dPhi_dF = (mu * F * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) + lmbda * (J - alpha) * J * FinvT)
+
     # Hessian has a complex form, we break it down to dF^T A dF, where A is 9 separate 3x3 blocks being the second derivative dPhi_dF2, each having 4 terms
     dPhi_dF2 = wp.zeros((9,), dtype=wp.mat33d)
     for i in range(3):
@@ -92,7 +93,7 @@ def compute_gradient_hessian (
                 mask * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) * mu * wp.identity(3, dtype=wp.float64)
                 + (wp.float64(2.0) * J - alpha) * lmbda * J * (wp.outer(FinvT[i], FinvT[j]))
                 - lmbda * (J - alpha) * J * (wp.outer(FinvT[j], FinvT[i]))
-                + wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0))) * (wp.outer(F[i], F[j]))
+                + wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0))) * wp.outer(F[i], F[j])
             )
 
     # Sum up all contributions
@@ -102,7 +103,7 @@ def compute_gradient_hessian (
             gradient[1] += volume * dPhi_dF[i, j] * dF_dx[1][i, j]
             gradient[2] += volume * dPhi_dF[i, j] * dF_dx[2][i, j]
 
-            hessian += volume * wp.transpose(dF_dx[i]) * dPhi_dF2[3*i + j] * dF_dx[j]
+            hessian += volume * wp.transpose(dF_dx[i]) * dPhi_dF2[3*i+j] * dF_dx[j]
 
     return gradient, hessian
 
@@ -439,14 +440,15 @@ class VBDSolver:
                 inputs=[new_positions, dx],
                 outputs=[new_positions]
             )
-
+            print(abs(dx.numpy()).max())
+            breakpoint()
             if abs(dx.numpy()).max() < 1e-6:
                 break
         
         if i == MAX_ITER - 1:
             print("Warning: VBD solver did not converge within the maximum number of iterations.")
 
-        print(f"Final dx in {i} iterations: {abs(dx.numpy()).max()}")
+        # print(f"Final dx in {i} iterations: {abs(dx.numpy()).max()}")
 
         # Discretize velocities, implicit Euler
         self.old_velocities = (new_positions - positions) / dt
