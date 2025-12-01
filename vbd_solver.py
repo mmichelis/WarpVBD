@@ -82,7 +82,10 @@ def compute_gradient_hessian (
     Ic = wp.trace(F * wp.transpose(F))
     Finv = wp.inverse(F)
     FinvT = wp.transpose(Finv)
-    dPhi_dF = (mu * F * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) + lmbda * (J - alpha) * J * FinvT)
+    dPhi_dF = (
+        mu * F * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) 
+        + lmbda * (J - alpha) * J * FinvT
+    )
 
     # Hessian has a complex form, we break it down to dF^T A dF, where A is 9 separate 3x3 blocks being the second derivative dPhi_dF2, each having 4 terms
     dPhi_dF2 = wp.zeros((9,), dtype=wp.mat33d)
@@ -103,7 +106,9 @@ def compute_gradient_hessian (
             gradient[1] += volume * dPhi_dF[i, j] * dF_dx[1][i, j]
             gradient[2] += volume * dPhi_dF[i, j] * dF_dx[2][i, j]
 
-            hessian += volume * wp.transpose(dF_dx[i]) * dPhi_dF2[3*i+j] * dF_dx[j]
+            for k in range(3):
+                for l in range(3):
+                    hessian[i, j] += volume * wp.dot(wp.transpose(dF_dx[i])[k], dPhi_dF2[3*k+l] * wp.transpose(dF_dx[j])[l])
 
     return gradient, hessian
 
@@ -440,8 +445,8 @@ class VBDSolver:
                 inputs=[new_positions, dx],
                 outputs=[new_positions]
             )
-            print(abs(dx.numpy()).max())
-            breakpoint()
+            # print(abs(dx.numpy()).max())
+            # breakpoint()
             if abs(dx.numpy()).max() < 1e-6:
                 break
         
