@@ -65,9 +65,14 @@ def compute_gradient_hessian (
     ### Create derivatives of Ds after positions (constants)
     dF_dx = wp.zeros(shape=(3,), dtype=wp.mat33d) # shape should technically be 9x3, but we can store as 3 mat33d for simplicity
     # Trick with masks to avoid branching
+    is_set = False
     for i in range(4):
         # Figure out which vertex we are differentiating with respect to
         mask = wp.float64(vertex_idx == ele[i])
+        if not is_set and mask > 0.0:
+            is_set = True
+        elif is_set and mask > 0.0:
+            wp.printf("Error: vertex_idx appears multiple times in element!\n")
         # Mask will only be true for one of the four vertices, sum up contributions in x, y, z
         dF_dx[0] += mask * dDs_dx[i][0] * inv_D
         dF_dx[1] += mask * dDs_dx[i][1] * inv_D
@@ -105,11 +110,11 @@ def compute_gradient_hessian (
     FinvT_other = wp.transpose(Finv_other)
     dPhi_dF = (
         mu * F * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) 
-        + lmbda * (J - alpha) * J * FinvT
+        # + lmbda * (J - alpha) * J * FinvT
     )
     dPhi_dF_other = (
         mu * F_other * (wp.float64(1.0) - wp.float64(1.0) / (Ic_other + wp.float64(1.0))) 
-        + lmbda * (J_other - alpha) * J_other * FinvT_other
+        # + lmbda * (J_other - alpha) * J_other * FinvT_other
     )
         
 
@@ -120,8 +125,8 @@ def compute_gradient_hessian (
             mask = wp.float64(i == j)
             dPhi_dF2[3*i+j] = (
                 mask * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) * mu * wp.identity(3, dtype=wp.float64)
-                + (wp.float64(2.0) * J - alpha) * lmbda * J * (wp.outer(FinvT[i], FinvT[j]))
-                - lmbda * (J - alpha) * J * (wp.outer(FinvT[j], FinvT[i]))
+                # + (wp.float64(2.0) * J - alpha) * lmbda * J * (wp.outer(FinvT[i], FinvT[j]))
+                # - lmbda * (J - alpha) * J * (wp.outer(FinvT[j], FinvT[i]))
                 + wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0))) * wp.outer(F[i], F[j])
             )
 
