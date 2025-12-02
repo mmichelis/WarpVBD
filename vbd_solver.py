@@ -112,19 +112,7 @@ def compute_gradient_hessian (
         mu * F_other * (wp.float64(1.0) - wp.float64(1.0) / (Ic_other + wp.float64(1.0))) 
         + lmbda * (J_other - alpha) * J_other * FinvT_other
     )
-        
 
-    # Hessian has a complex form, we break it down to dF^T A dF, where A is 9 separate 3x3 blocks being the second derivative dPhi_dF2, each having 4 terms
-    # dPhi_dF2 = wp.zeros((9,), dtype=wp.mat33d)
-    # for i in range(3):
-    #     for j in range(3):
-    #         mask = wp.float64(i == j)
-    #         dPhi_dF2[3*i+j] = (
-    #             mask * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) * mu * wp.identity(3, dtype=wp.float64)
-    #             # + (wp.float64(2.0) * J - alpha) * lmbda * J * (wp.outer(FinvT[i], FinvT[j]))
-    #             # - lmbda * (J - alpha) * J * (wp.outer(FinvT[j], FinvT[i]))
-    #             + wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0))) * wp.outer(F[i], F[j])
-    #         )
 
     # Sum up all contributions
     for i in range(3):
@@ -183,7 +171,7 @@ def accumulate_grad_hess (
         inv_Dm: Inverted undeformed shape matrices for elements.
         dDs_dx: Derivatives of Ds with respect to positions. Shape [4, 3, 3, 3], a 3x3 matrix for each vertex of the tetrahedron.
 
-        masses: Vertex masses.
+        masses: Element masses.
         lame_mu: Lame parameter mu.
         lame_lambda: Lame parameter lambda.
 
@@ -414,7 +402,7 @@ class VBDSolver:
 
         ### Compute mass per element from element densities
         n_elements = elements.shape[0]
-        self.masses = wp.zeros(initial_positions.shape[0], dtype=wp.float64)
+        self.masses = wp.zeros(n_elements, dtype=wp.float64)
         wp.launch(
             compute_element_masses,
             dim=n_elements,
@@ -490,7 +478,12 @@ class VBDSolver:
             wp.launch(
                 accumulate_grad_hess,
                 dim=[n_colors, n_vertices_per_color, n_elements_per_vertex],
-                inputs=[new_positions, self.old_positions, self.old_velocities, self.inv_Dm, self.dDs_dx, self.masses, self.lame_mu, self.lame_lambda, self.gravity, dt, self.elements, self.adj_v2e, self.color_groups, self.active_mask],
+                inputs=[
+                    new_positions, self.old_positions, self.old_velocities, 
+                    self.inv_Dm, self.dDs_dx, 
+                    self.masses, self.lame_mu, self.lame_lambda, self.gravity, dt, 
+                    self.elements, self.adj_v2e, self.color_groups, self.active_mask
+                ],
                 outputs=[gradients, gradients_other, hessians]
             )
             dx = wp.zeros((n_vertices, 3), dtype=wp.float64)
