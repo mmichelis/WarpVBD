@@ -46,9 +46,12 @@ def main (args):
 
     # Set active mask
     active_mask = np.ones((vertices.shape[0],), dtype=bool)
+    tip_idx = []
     for i in range(vertices.shape[0]):
         if vertices[i,0] < 1e-3:
             active_mask[i] = False
+        elif vertices[i,0] > (args.nx * args.dx - 1e-3):
+            tip_idx.append(i)
     print(f"Active vertices: {np.sum(active_mask)}/{vertices.shape[0]}")
 
     ### Perform graph coloring
@@ -66,21 +69,6 @@ def main (args):
         group = color_groups[c]
         colors[c, :len(group)] = group
 
-    ### Plot coloring in 3D
-    if args.visualize:
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        for ele in elements:
-            ax.plot(vertices[ele[[0,1]],0], vertices[ele[[0,1]],1], vertices[ele[[0,1]],2], 'k-', linewidth=1.0, alpha=0.8)
-            ax.plot(vertices[ele[[0,2]],0], vertices[ele[[0,2]],1], vertices[ele[[0,2]],2], 'k-', linewidth=1.0, alpha=0.8)
-            ax.plot(vertices[ele[[0,3]],0], vertices[ele[[0,3]],1], vertices[ele[[0,3]],2], 'k-', linewidth=1.0, alpha=0.8)
-            ax.plot(vertices[ele[[1,2]],0], vertices[ele[[1,2]],1], vertices[ele[[1,2]],2], 'k-', linewidth=1.0, alpha=0.8)
-            ax.plot(vertices[ele[[1,3]],0], vertices[ele[[1,3]],1], vertices[ele[[1,3]],2], 'k-', linewidth=1.0, alpha=0.8)
-            ax.plot(vertices[ele[[2,3]],0], vertices[ele[[2,3]],1], vertices[ele[[2,3]],2], 'k-', linewidth=1.0, alpha=0.8)
-        ax.scatter(vertices[:,0], vertices[:,1], vertices[:,2], c=colors, cmap='jet', s=50, alpha=1.0)
-        ax.set_title("Graph Coloring of Tetrahedral Mesh Vertices")
-        fig.savefig("graph_coloring.png", dpi=300, bbox_inches='tight')
-        plt.close(fig)
 
     # Find an adjacency mapping from vertex -> neighboring elements
     num_vertices = vertices.shape[0]
@@ -104,9 +92,9 @@ def main (args):
     active_mask = wp.array(active_mask, dtype=wp.bool)
     densities = wp.array(1000 * np.ones(num_elements), dtype=wp.float64)  # Uniform density
     n_seconds = 1.0
-    fps = 30
+    fps = 300
     n_timesteps = int(n_seconds * fps)
-    n_substeps = 10
+    n_substeps = 100
     dt = 1/fps/n_substeps
     print(f"Simulating {n_seconds}s of dynamics in {n_timesteps} timesteps of {n_substeps} substeps each (dt={dt:.6f}s).")
 
@@ -116,23 +104,41 @@ def main (args):
         adj_v2e=adj_v2e,
         color_groups=colors,
         densities=densities,
-        youngs_modulus=1e5,
+        youngs_modulus=5e5,
         poisson_ratio=0.4,
-        active_mask=active_mask
+        active_mask=active_mask,
+        gravity=wp.vec3(0.0, 0.0, -9.81)
     )
+    tip_positions = []
     for t in range(n_timesteps):
         start_time = time.time()
 
         for i in range(n_substeps):
             solution = solver.step(solution, wp.float64(dt))
+            tip_positions.append(solution.numpy()[tip_idx].mean(axis=0))
 
         end_time = time.time()
         print(f"---Timestep [{t:04d}/{n_timesteps}] ({1e3*dt*n_substeps:.1f}ms) in {1e3*(end_time - start_time):.3f}ms: Mean Positions: {solution.numpy().mean(axis=0)}")
 
-        render(solution.numpy(), elements.numpy(), filename=f"outputs/sim/vbd_simulation.pbrt_{t:03d}.png", spp=4)
+        if args.visualize:
+            render(solution.numpy(), elements.numpy(), filename=f"outputs/sim/cantilever_{t:03d}.png", spp=4)
 
-    # Render mp4
-    export_mp4("outputs/sim/", "outputs/vbd_simulation.mp4", fps=fps)
+        # Plot Tip Displacements
+        fig, ax = plt.subplots(figsize=(3,2))
+        tip_positions_np = np.array(tip_positions)
+        ax.plot(np.arange(len(tip_positions_np)) * dt, tip_positions_np[:, 2])  # Plot z displacement over time
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Z Position (m)")
+        ax.grid()
+        ax.set_xlim(0, n_seconds)
+        ax.ticklabel_format(axis='both', style='sci', scilimits=(0,0))
+        fig.savefig("outputs/tip_displacement.png", dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
+    if args.visualize:
+        # Render mp4
+        export_mp4("outputs/sim/", "outputs/cantilever.mp4", fps=int(0.25*fps), name_prefix="cantilever_")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

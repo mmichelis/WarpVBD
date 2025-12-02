@@ -481,9 +481,9 @@ class VBDSolver:
                 inputs=[new_positions, dx],
                 outputs=[new_positions]
             )
-            print(abs(dx.numpy()).max())
+            # print(abs(dx.numpy()).max())
             # breakpoint()
-            if abs(dx.numpy()).max() < 1e-6:
+            if abs(dx.numpy()).max() < 1e-9:
                 break
         
         if i == MAX_ITER - 1:
