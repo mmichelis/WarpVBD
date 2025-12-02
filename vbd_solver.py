@@ -1,5 +1,7 @@
 ### VBD solver implementation
 
+import matplotlib.pyplot as plt
+
 import numpy as np
 import warp as wp
 
@@ -163,11 +165,12 @@ def elastic_gradient_hessian (
     # Trick with masks to avoid branching
     for i in range(4):
         # Figure out which vertex we are differentiating with respect to
-        mask = wp.float64(vertex_idx == ele[i])
-        # Mask will only be true for one of the four vertices, sum up contributions in x, y, z
-        dF_dx[0] += mask * dDs_dx[i][0] * inv_D
-        dF_dx[1] += mask * dDs_dx[i][1] * inv_D
-        dF_dx[2] += mask * dDs_dx[i][2] * inv_D
+        # mask = wp.float64(vertex_idx == ele[i])
+        if vertex_idx == ele[i]:
+            # Mask will only be true for one of the four vertices, sum up contributions in x, y, z
+            dF_dx[0] = dDs_dx[i][0] * inv_D
+            dF_dx[1] = dDs_dx[i][1] * inv_D
+            dF_dx[2] = dDs_dx[i][2] * inv_D
 
 
     ### Assemble gradient and hessian
@@ -175,14 +178,8 @@ def elastic_gradient_hessian (
     hessian = wp.mat33d()
 
     # Elastic, St. Venant-Kirchhoff
-    J = wp.determinant(F)
     Ft = wp.transpose(F)
-    Finv = wp.inverse(F)
-    FinvT = wp.transpose(Finv)
     E = wp.float64(0.5) * (Ft * F - wp.identity(3, dtype=wp.float64))
-    dtr_dx = wp.zeros(shape=(3,), dtype=wp.mat33d)
-    for i in range(3):
-        dtr_dx[i] = wp.float64(0.5) * (Ft * dF_dx[i] + wp.transpose(dF_dx[i]) * F)
 
     # Sum up all contributions
     for i in range(3):
@@ -194,6 +191,7 @@ def elastic_gradient_hessian (
         for j in range(3):
             dEdxj = wp.float64(0.5) * (Ft * dF_dx[j] + wp.transpose(dF_dx[j]) * F)
             d2E_dxidxj = wp.float64(0.5) * (wp.transpose(dF_dx[i]) * dF_dx[j] + wp.transpose(dF_dx[j]) * dF_dx[i])
+            
             hessian[i, j] += volume * (
                 lame_lambda * (wp.trace(dEdxi) * wp.trace(dEdxj) + wp.trace(E) * wp.trace(d2E_dxidxj))
                 + wp.float64(2.0) * lame_mu * (wp.trace(wp.transpose(dEdxi) * dEdxj) + wp.trace(wp.transpose(d2E_dxidxj) * E))
@@ -422,6 +420,14 @@ def compute_inv_Dm (
         X2 - X3
     )
     inv_Dm[i] = wp.inverse(Dm)
+    # Check if inversion was successful
+    res = Dm * inv_Dm[i]
+    for r in range(3):
+        for c in range(3):
+            if r == c:
+                assert wp.abs(res[r,c] - wp.float64(1.0)) < EPS, "Singular matrix encountered in inv_Dm computation!"
+            else:
+                assert wp.abs(res[r,c]) < EPS, "Singular matrix encountered in inv_Dm computation!"
 
 
 class VBDSolver:
@@ -441,6 +447,8 @@ class VBDSolver:
 
             active_mask: wp.array(dtype=wp.bool)=None,
             gravity: wp.vec3d = wp.vec3d(0.0, 0.0, -9.81),
+
+            device: str = "cpu"
         ) -> None:
         """
         Initialize the VBD solver with the tetrahedral mesh and simulation parameters.
@@ -468,6 +476,8 @@ class VBDSolver:
         self.densities = densities
         self.damping_coefficient = damping_coefficient
         self.gravity = gravity
+        self.device = device
+
         if active_mask is not None:
             self.active_mask = active_mask
         else:
@@ -485,22 +495,24 @@ class VBDSolver:
 
         ### Compute mass per element from element densities
         n_elements = elements.shape[0]
-        self.masses = wp.zeros(n_elements, dtype=wp.float64)
-        self.volumes = wp.zeros(n_elements, dtype=wp.float64)
+        self.masses = wp.zeros(n_elements, dtype=wp.float64, device=device)
+        self.volumes = wp.zeros(n_elements, dtype=wp.float64, device=device)
         wp.launch(
             compute_element_masses_volume,
             dim=n_elements,
             inputs=[initial_positions, elements, densities],
-            outputs=[self.masses, self.volumes]
+            outputs=[self.masses, self.volumes],
+            device=device
         )
 
         ### Compute inverted undeformed/reference shape matrix for tetrahedrons.
-        self.inv_Dm = wp.zeros(n_elements, dtype=wp.mat33d)
+        self.inv_Dm = wp.zeros(n_elements, dtype=wp.mat33d, device=device)
         wp.launch(
             compute_inv_Dm,
             dim=n_elements,
             inputs=[initial_positions, elements],
-            outputs=[self.inv_Dm]
+            outputs=[self.inv_Dm],
+            device=device
         )
 
         # Precompute the constant dDs_dx
@@ -521,7 +533,7 @@ class VBDSolver:
         dDs_dx[3][1] = np.array([-0.0, -0.0, -0.0, -1.0, -1.0, -1.0, -0.0, -0.0, -0.0]).reshape(3,3)
         dDs_dx[3][2] = np.array([-0.0, -0.0, -0.0, -0.0, -0.0, -0.0, -1.0, -1.0, -1.0]).reshape(3,3)
 
-        self.dDs_dx = wp.array(dDs_dx, dtype=wp.mat33d)
+        self.dDs_dx = wp.array(dDs_dx, dtype=wp.mat33d, device=device)
 
 
     def step (
@@ -553,11 +565,13 @@ class VBDSolver:
         # )
 
         # TODO: Lot of memory use, optimization possible
-        gradients = wp.zeros((n_vertices, n_elements_per_vertex, 3), dtype=wp.float64)
-        hessians = wp.zeros((n_vertices, n_elements_per_vertex, 3, 3), dtype=wp.float64)
+        gradients = wp.zeros((n_vertices, n_elements_per_vertex, 3), dtype=wp.float64, device=self.device)
+        hessians = wp.zeros((n_vertices, n_elements_per_vertex, 3, 3), dtype=wp.float64, device=self.device)
 
+        hist_dx = []
         MAX_ITER = 100
         for i in range(MAX_ITER):
+            wp.synchronize_device(self.device)
             wp.launch(
                 accumulate_grad_hess,
                 dim=[n_colors, n_vertices_per_color, n_elements_per_vertex],
@@ -568,24 +582,30 @@ class VBDSolver:
                     self.gravity, dt, 
                     self.elements, self.adj_v2e, self.color_groups, self.active_mask
                 ],
-                outputs=[gradients, hessians]
+                outputs=[gradients, hessians],
+                device=self.device
             )
-            dx = wp.zeros((n_vertices, 3), dtype=wp.float64)
+            dx = wp.zeros((n_vertices, 3), dtype=wp.float64, device=self.device)
+            wp.synchronize_device(self.device)
             wp.launch_tiled(
                 solve_grad_hess,
                 dim=n_vertices,
                 block_dim=64,
                 inputs=[gradients, hessians, self.active_mask],
-                outputs=[dx]
+                outputs=[dx],
+                device=self.device
             )
+            wp.synchronize_device(self.device)
             wp.launch(
                 add_dx,
                 dim=n_vertices,
                 inputs=[new_positions, dx],
-                outputs=[new_positions]
+                outputs=[new_positions],
+                device=self.device
             )
-            print(abs(dx.numpy()).max())
-            breakpoint()
+            # print(abs(dx.numpy()).max())
+            # breakpoint()
+            hist_dx.append(abs(dx.numpy()).mean())
             if abs(dx.numpy()).max() < 1e-9:
                 break
         
@@ -594,6 +614,16 @@ class VBDSolver:
             print(f"Warning: VBD solver did not converge within the maximum number of iterations. Final dx max: {abs(dx.numpy()).max()}")
 
         # print(f"Final dx in {i} iterations: {abs(dx.numpy()).max()}")
+
+        # fig, ax = plt.subplots(figsize=(3,2))
+        # ax.plot(np.array(hist_dx))
+        # ax.set_xlabel("Iteration (-)")
+        # ax.set_ylabel("Average dx (m)")
+        # ax.grid()
+        # ax.set_xlim(0, len(hist_dx))
+        # ax.set_yscale("log")
+        # fig.savefig("outputs/vbd_convergence.png", dpi=300, bbox_inches='tight')
+        # plt.close(fig)
 
         # Discretize velocities, implicit Euler
         self.old_velocities = (new_positions - positions) / dt

@@ -25,7 +25,7 @@ def render (vertices, elements, filename=None, spp=4):
         'camera_lookat': (0.1, 0.25, 0.25),     # Position that camera looks at
     }
     transforms=[
-        ('s', 1.0),
+        ('s', 1),
         ('t', [0, 0, 0.3])
     ]
     renderer = PbrtRenderer(options)
@@ -52,6 +52,7 @@ def main (args):
             active_mask[i] = False
         elif vertices[i,0] > (args.nx * args.dx - 1e-3):
             tip_idx.append(i)
+    # active_mask = np.ones((vertices.shape[0],), dtype=bool)
     print(f"Active vertices: {np.sum(active_mask)}/{vertices.shape[0]}")
 
     ### Perform graph coloring
@@ -85,14 +86,16 @@ def main (args):
             assert j < maximal_degree, "Maximal degree exceeded!"
 
     ### Begin the solve
-    solution = wp.array(vertices, dtype=wp.vec3d)
-    elements = wp.array(elements, dtype=wp.vec4i)
-    adj_v2e = wp.array(adj_v2e, dtype=wp.int32)
-    colors = wp.array(colors, dtype=wp.int32)
-    active_mask = wp.array(active_mask, dtype=wp.bool)
-    densities = wp.array(1000 * np.ones(num_elements), dtype=wp.float64)  # Uniform density
+    device = "cuda"
+    wp.init()
+    solution = wp.array(vertices, dtype=wp.vec3d, device=device)
+    elements = wp.array(elements, dtype=wp.vec4i, device=device)
+    adj_v2e = wp.array(adj_v2e, dtype=wp.int32, device=device)
+    colors = wp.array(colors, dtype=wp.int32, device=device)
+    active_mask = wp.array(active_mask, dtype=wp.bool, device=device)
+    densities = wp.array(1000 * np.ones(num_elements), dtype=wp.float64, device=device)  # Uniform density
     n_seconds = 1.0
-    fps = 300
+    fps = 30
     n_timesteps = int(n_seconds * fps)
     n_substeps = 100
     dt = 1/fps/n_substeps
@@ -104,10 +107,12 @@ def main (args):
         adj_v2e=adj_v2e,
         color_groups=colors,
         densities=densities,
-        youngs_modulus=5e5,
+        youngs_modulus=1e5,
         poisson_ratio=0.4,
+        damping_coefficient=0.0,
         active_mask=active_mask,
-        gravity=wp.vec3(0.0, 0.0, -9.81)
+        gravity=wp.vec3d(0.0, 0.0, -9.81),
+        device=device
     )
     tip_positions = []
     for t in range(n_timesteps):
