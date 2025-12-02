@@ -44,7 +44,7 @@ def inertial_gradient_hessian (
 
 
 @wp.func
-def elastic_gradient_hessian (
+def _elastic_gradient_hessian (
     vertex_idx: wp.int32,
     ele_idx: wp.int32,
     positions: wp.array(dtype=wp.vec3d),
@@ -120,6 +120,83 @@ def elastic_gradient_hessian (
                 + mu * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) * wp.trace(wp.transpose(dF_dx[i]) * dF_dx[j])
                 + lmbda * J * (wp.float64(2.0) * J - alpha) * wp.trace(Finv * dF_dx[i]) * wp.trace(Finv * dF_dx[j])
                 - lmbda * J * (J - alpha) * wp.trace(Finv * dF_dx[j] * Finv * dF_dx[i])
+            )
+
+    return gradient, hessian
+
+
+@wp.func
+def elastic_gradient_hessian (
+    vertex_idx: wp.int32,
+    ele_idx: wp.int32,
+    positions: wp.array(dtype=wp.vec3d),
+    volumes: wp.array(dtype=wp.float64),
+    inv_Dm: wp.array(dtype=wp.mat33d),
+    dDs_dx: wp.array2d(dtype=wp.mat33d),
+    lame_mu: wp.float64,
+    lame_lambda: wp.float64,
+    elements: wp.array(dtype=wp.vec4i)
+) -> tuple[wp.vec3d, wp.mat33d]:
+    """
+    Compute the gradient and hessian of the energy with respect to vertex positions of a specific element.
+    """
+    ele = elements[ele_idx]
+    inv_D = inv_Dm[ele_idx]
+
+    ### Compute deformation gradient F
+    x0 = positions[ele[0]]
+    x1 = positions[ele[1]]
+    x2 = positions[ele[2]]
+    x3 = positions[ele[3]]
+
+    # Deformed shape matrix # TODO write out matmul and skip mat33d initialization for performance
+    Ds = wp.matrix_from_cols(
+        x0 - x3,
+        x1 - x3,
+        x2 - x3
+    )
+    F = Ds * inv_D
+    volume = volumes[ele_idx]
+
+    ### Create derivatives of Ds after positions (constants)
+    dF_dx = wp.zeros(shape=(3,), dtype=wp.mat33d) # shape should technically be 9x3, but we can store as 3 mat33d for simplicity
+    # Trick with masks to avoid branching
+    for i in range(4):
+        # Figure out which vertex we are differentiating with respect to
+        mask = wp.float64(vertex_idx == ele[i])
+        # Mask will only be true for one of the four vertices, sum up contributions in x, y, z
+        dF_dx[0] += mask * dDs_dx[i][0] * inv_D
+        dF_dx[1] += mask * dDs_dx[i][1] * inv_D
+        dF_dx[2] += mask * dDs_dx[i][2] * inv_D
+
+
+    ### Assemble gradient and hessian
+    gradient = wp.vec3d()
+    hessian = wp.mat33d()
+
+    # Elastic, St. Venant-Kirchhoff
+    J = wp.determinant(F)
+    Ft = wp.transpose(F)
+    Finv = wp.inverse(F)
+    FinvT = wp.transpose(Finv)
+    E = wp.float64(0.5) * (Ft * F - wp.identity(3, dtype=wp.float64))
+    dtr_dx = wp.zeros(shape=(3,), dtype=wp.mat33d)
+    for i in range(3):
+        dtr_dx[i] = wp.float64(0.5) * (Ft * dF_dx[i] + wp.transpose(dF_dx[i]) * F)
+
+    # Sum up all contributions
+    for i in range(3):
+        dEdxi = wp.float64(0.5) * (Ft * dF_dx[i] + wp.transpose(dF_dx[i]) * F)
+        gradient[i] = volume * (
+            lame_lambda * wp.trace(E) * wp.trace(dEdxi)
+            + wp.float64(2.0) * lame_mu * wp.trace(wp.transpose(dEdxi) * E)
+        )
+        for j in range(3):
+            dEdxj = wp.float64(0.5) * (Ft * dF_dx[j] + wp.transpose(dF_dx[j]) * F)
+            d2E_dxidxj = wp.float64(0.5) * (wp.transpose(dF_dx[i]) * dF_dx[j] + wp.transpose(dF_dx[j]) * dF_dx[i])
+            hessian[i, j] += volume * (
+                lame_lambda * (wp.trace(dEdxi) * wp.trace(dEdxj) + wp.trace(E) * wp.trace(d2E_dxidxj))
+                + wp.float64(2.0) * lame_mu * (wp.trace(wp.transpose(dEdxi) * dEdxj) + wp.trace(wp.transpose(d2E_dxidxj) * E))
             )
 
     return gradient, hessian
@@ -245,8 +322,10 @@ def add_dx (
 ) -> None:
     i = wp.tid()
 
-    for j in range(3):
-        new_positions[i][j] = positions[i][j] + dx[i][j]
+    new_positions[i] = positions[i] + wp.vec3d(dx[i,0], dx[i,1], dx[i,2])
+
+    # for j in range(3):
+    #     new_positions[i][j] = positions[i][j] + dx[i][j]
 
 
 @wp.kernel
@@ -505,8 +584,8 @@ class VBDSolver:
                 inputs=[new_positions, dx],
                 outputs=[new_positions]
             )
-            # print(abs(dx.numpy()).max())
-            # breakpoint()
+            print(abs(dx.numpy()).max())
+            breakpoint()
             if abs(dx.numpy()).max() < 1e-9:
                 break
         
