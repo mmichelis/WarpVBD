@@ -8,20 +8,58 @@ MAX_ELEMENTS_PER_VERTEX = 128
 
 DELTA = 1e-6
 
+
+
 @wp.func
-def compute_gradient_hessian (
+def inertial_gradient_hessian (
     vertex_idx: wp.int32,
     ele_idx: wp.int32,
     positions: wp.array(dtype=wp.vec3d),
     old_positions: wp.array(dtype=wp.vec3d),
     old_velocities: wp.array(dtype=wp.vec3d),
-    inv_Dm: wp.array(dtype=wp.mat33d),
-    dDs_dx: wp.array2d(dtype=wp.mat33d),
     masses: wp.array(dtype=wp.float64),
-    lame_mu: wp.float64,
-    lame_lambda: wp.float64,
     gravity: wp.vec3d,
     dt: wp.float64,
+# ) -> tuple[wp.vec3d, wp.mat33d]:
+):
+    """
+    Compute the gradient and hessian of the inertia potential with respect to vertex positions of a specific element. We add gravity as external acceleration here as well.
+    """
+    x = positions[vertex_idx]
+    x_other = x + wp.vec3d(wp.float64(DELTA), wp.float64(0.0), wp.float64(0.0))  # For finite difference check
+    x_prev = old_positions[vertex_idx]
+    v_prev = old_velocities[vertex_idx]
+    m = masses[ele_idx] / wp.float64(4.0)  # Mass of the vertex (1/4 of element mass)
+
+    ### Assemble gradient and hessian
+    gradient = wp.vec3d()
+    gradient_other = wp.vec3d()  # For finite difference check
+    hessian = wp.mat33d()
+
+    # Kinetic
+    y = x_prev + dt * v_prev # + external accelerations, if any. TODO
+    gradient += m  / (dt * dt) * (x - y)
+    gradient_other += m  / (dt * dt) * (x_other - y)
+    hessian += m / (dt * dt) * wp.identity(3, dtype=wp.float64)
+
+    # Gravity
+    gradient += -m * gravity
+    gradient_other += -m * gravity
+    # no hessian
+
+
+    return gradient, gradient_other, hessian
+
+
+@wp.func
+def elastic_gradient_hessian (
+    vertex_idx: wp.int32,
+    ele_idx: wp.int32,
+    positions: wp.array(dtype=wp.vec3d),
+    inv_Dm: wp.array(dtype=wp.mat33d),
+    dDs_dx: wp.array2d(dtype=wp.mat33d),
+    lame_mu: wp.float64,
+    lame_lambda: wp.float64,
     elements: wp.array(dtype=wp.vec4i)
 # ) -> tuple[wp.vec3d, wp.mat33d]:
 ):
@@ -30,9 +68,6 @@ def compute_gradient_hessian (
     """
     x = positions[vertex_idx]
     x_other = x + wp.vec3d(wp.float64(DELTA), wp.float64(0.0), wp.float64(0.0))  # For finite difference check
-    x_prev = old_positions[vertex_idx]
-    v_prev = old_velocities[vertex_idx]
-    m = masses[ele_idx] / wp.float64(4.0)  # Mass of the vertex (1/4 of element mass)
     ele = elements[ele_idx]
     inv_D = inv_Dm[ele_idx]
 
@@ -78,17 +113,6 @@ def compute_gradient_hessian (
     gradient = wp.vec3d()
     gradient_other = wp.vec3d()  # For finite difference check
     hessian = wp.mat33d()
-
-    # Kinetic
-    y = x_prev + dt * v_prev # + external accelerations, if any. TODO
-    gradient += m  / (dt * dt) * (x - y)
-    gradient_other += m  / (dt * dt) * (x_other - y)
-    hessian += m / (dt * dt) * wp.identity(3, dtype=wp.float64)
-
-    # Gravity
-    gradient += -m * gravity
-    gradient_other += -m * gravity
-    # no hessian
 
     # Elastic, stable Neo-hookean
     mu = wp.float64(4.0) * lame_mu / wp.float64(3.0)                    # Adjusted mu for stable Neo-Hookean
@@ -147,6 +171,7 @@ def accumulate_grad_hess (
     masses: wp.array(dtype=wp.float64),
     lame_mu: wp.float64,
     lame_lambda: wp.float64,
+    damping_coefficient: wp.float64,
 
     gravity: wp.vec3d,
     dt: wp.float64,
@@ -201,13 +226,19 @@ def accumulate_grad_hess (
     if not active_mask[idx_v]:
         return
 
-    grad, grad_other, hess = compute_gradient_hessian(idx_v, idx_e, positions, old_positions, old_velocities, inv_Dm, dDs_dx, masses, lame_mu, lame_lambda, gravity, dt, elements)
-    for k in range(3):
-        gradients[idx_v, j, k] = grad[k]
-        gradients_other[idx_v, j, k] = grad_other[k]
-        for l in range(3):
-            hessians[idx_v, j, k, l] = hess[k, l]
+    ### Compute gradients and hessians
+    grad_inertial, grad_other_inertia, hess_inertia = inertial_gradient_hessian(idx_v, idx_e, positions, old_positions, old_velocities, masses, gravity, dt)
+    grad_elastic, grad_other_elastic, hess_elastic = elastic_gradient_hessian(idx_v, idx_e, positions, inv_Dm, dDs_dx, lame_mu, lame_lambda, elements)
+    # Add damping
+    grad_damping = damping_coefficient * hess_elastic * (positions[idx_v] - old_positions[idx_v]) / dt
+    hess_damping = damping_coefficient * hess_elastic / dt
 
+    ### Accumulate results
+    for k in range(3):
+        gradients[idx_v, j, k] = grad_inertial[k] + grad_elastic[k] + grad_damping[k]
+        gradients_other[idx_v, j, k] = grad_other_inertia[k] + grad_other_elastic[k]
+        for l in range(3):
+            hessians[idx_v, j, k, l] = hess_inertia[k, l] + hess_elastic[k, l] + hess_damping[k, l]
 
 
 @wp.kernel
@@ -356,6 +387,7 @@ class VBDSolver:
             lame_lambda: wp.float64 = wp.float64(0.0),
             youngs_modulus: wp.float64 = wp.float64(0.0),
             poisson_ratio: wp.float64 = wp.float64(0.5),
+            damping_coefficient: wp.float64 = wp.float64(1.0),
 
             active_mask: wp.array(dtype=wp.bool)=None,
             gravity: wp.vec3d = wp.vec3d(0.0, 0.0, -9.81),
@@ -384,6 +416,7 @@ class VBDSolver:
         self.adj_v2e = adj_v2e
         self.color_groups = color_groups
         self.densities = densities
+        self.damping_coefficient = damping_coefficient
         self.gravity = gravity
         if active_mask is not None:
             self.active_mask = active_mask
@@ -473,7 +506,7 @@ class VBDSolver:
         gradients_other = wp.zeros((n_vertices, n_elements_per_vertex, 3), dtype=wp.float64)
         hessians = wp.zeros((n_vertices, n_elements_per_vertex, 3, 3), dtype=wp.float64)
 
-        MAX_ITER = 100
+        MAX_ITER = 1000
         for i in range(MAX_ITER):
             wp.launch(
                 accumulate_grad_hess,
@@ -481,7 +514,8 @@ class VBDSolver:
                 inputs=[
                     new_positions, self.old_positions, self.old_velocities, 
                     self.inv_Dm, self.dDs_dx, 
-                    self.masses, self.lame_mu, self.lame_lambda, self.gravity, dt, 
+                    self.masses, self.lame_mu, self.lame_lambda, self.damping_coefficient,
+                    self.gravity, dt, 
                     self.elements, self.adj_v2e, self.color_groups, self.active_mask
                 ],
                 outputs=[gradients, gradients_other, hessians]
@@ -505,6 +539,7 @@ class VBDSolver:
             if abs(dx.numpy()).max() < 1e-9:
                 break
         
+        # breakpoint()
         if i == MAX_ITER - 1:
             print("Warning: VBD solver did not converge within the maximum number of iterations.")
 
