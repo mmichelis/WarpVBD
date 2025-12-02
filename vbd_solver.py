@@ -32,7 +32,7 @@ def compute_gradient_hessian (
     x_other = x + wp.vec3d(wp.float64(DELTA), wp.float64(0.0), wp.float64(0.0))  # For finite difference check
     x_prev = old_positions[vertex_idx]
     v_prev = old_velocities[vertex_idx]
-    m = masses[vertex_idx]
+    m = masses[ele_idx] / wp.float64(4.0)  # Mass of the vertex (1/4 of element mass)
     ele = elements[ele_idx]
     inv_D = inv_Dm[ele_idx]
 
@@ -129,15 +129,15 @@ def compute_gradient_hessian (
     # Sum up all contributions
     for i in range(3):
         for j in range(3):
-            gradient[0] += volume * dPhi_dF[i, j] * dF_dx[0][i, j]
-            gradient[1] += volume * dPhi_dF[i, j] * dF_dx[1][i, j]
-            gradient[2] += volume * dPhi_dF[i, j] * dF_dx[2][i, j]
+            gradient[0] += volume / wp.float64(4.0) * dPhi_dF[i, j] * dF_dx[0][i, j]
+            gradient[1] += volume / wp.float64(4.0) * dPhi_dF[i, j] * dF_dx[1][i, j]
+            gradient[2] += volume / wp.float64(4.0) * dPhi_dF[i, j] * dF_dx[2][i, j]
 
-            gradient_other[0] += volume * dPhi_dF_other[i, j] * dF_dx[0][i, j]
-            gradient_other[1] += volume * dPhi_dF_other[i, j] * dF_dx[1][i, j]
-            gradient_other[2] += volume * dPhi_dF_other[i, j] * dF_dx[2][i, j]
+            gradient_other[0] += volume / wp.float64(4.0) * dPhi_dF_other[i, j] * dF_dx[0][i, j]
+            gradient_other[1] += volume / wp.float64(4.0) * dPhi_dF_other[i, j] * dF_dx[1][i, j]
+            gradient_other[2] += volume / wp.float64(4.0) * dPhi_dF_other[i, j] * dF_dx[2][i, j]
 
-            hessian[i, j] += volume * (
+            hessian[i, j] += volume / wp.float64(4.0) * (
                 wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0))) * wp.trace(Ft * dF_dx[i]) * wp.trace(Ft * dF_dx[j])
                 + mu * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) * wp.trace(wp.transpose(dF_dx[i]) * dF_dx[j])
                 + lmbda * J * (wp.float64(2.0) * J - alpha) * wp.trace(Finv * dF_dx[i]) * wp.trace(Finv * dF_dx[j])
@@ -284,7 +284,7 @@ def position_initialization (
 
 
 @wp.kernel
-def compute_vertex_masses (
+def compute_element_masses (
     positions: wp.array(dtype=wp.vec3d),
     elements: wp.array(dtype=wp.vec4i),
     densities: wp.array(dtype=wp.float64),
@@ -292,13 +292,13 @@ def compute_vertex_masses (
     masses: wp.array(dtype=wp.float64)
 ) -> None:
     """
-    Compute mass per vertex from element densities.
+    Compute mass per element from element densities.
 
     Args:
         positions: Vertex positions.
         elements: Mesh elements.
         densities: Element densities.
-        masses: Output array for vertex masses.
+        masses: Output array for masses.
     """
     i = wp.tid()
 
@@ -316,11 +316,11 @@ def compute_vertex_masses (
         x2 - x3
     )
     volume = wp.abs(wp.determinant(Dm)) / wp.float64(6.0)
-    mass = density * volume
+    masses[i] = density * volume
 
     # Distribute mass equally to the four vertices, TODO: INEFFICIENT, CHANGE TO TILES
-    for k in range(4):
-        wp.atomic_add(masses, ele[k], mass / wp.float64(4.0))
+    # for k in range(4):
+    #     wp.atomic_add(masses, ele[k], mass / wp.float64(4.0))
 
 
 @wp.kernel
@@ -412,11 +412,11 @@ class VBDSolver:
         self.lame_lambda = lame_lambda
 
 
-        ### Compute mass per vertex from element densities
+        ### Compute mass per element from element densities
         n_elements = elements.shape[0]
         self.masses = wp.zeros(initial_positions.shape[0], dtype=wp.float64)
         wp.launch(
-            compute_vertex_masses,
+            compute_element_masses,
             dim=n_elements,
             inputs=[initial_positions, elements, densities],
             outputs=[self.masses]
