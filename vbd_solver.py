@@ -6,8 +6,6 @@ import warp as wp
 EPS = 1e-12
 MAX_ELEMENTS_PER_VERTEX = 128
 
-DELTA = 1e-6
-
 
 
 @wp.func
@@ -20,35 +18,29 @@ def inertial_gradient_hessian (
     masses: wp.array(dtype=wp.float64),
     gravity: wp.vec3d,
     dt: wp.float64,
-# ) -> tuple[wp.vec3d, wp.mat33d]:
-):
+) -> tuple[wp.vec3d, wp.mat33d]:
     """
     Compute the gradient and hessian of the inertia potential with respect to vertex positions of a specific element. We add gravity as external acceleration here as well.
     """
     x = positions[vertex_idx]
-    x_other = x + wp.vec3d(wp.float64(DELTA), wp.float64(0.0), wp.float64(0.0))  # For finite difference check
     x_prev = old_positions[vertex_idx]
     v_prev = old_velocities[vertex_idx]
     m = masses[ele_idx] / wp.float64(4.0)  # Mass of the vertex (1/4 of element mass)
 
     ### Assemble gradient and hessian
     gradient = wp.vec3d()
-    gradient_other = wp.vec3d()  # For finite difference check
     hessian = wp.mat33d()
 
     # Kinetic
-    y = x_prev + dt * v_prev # + external accelerations, if any. TODO
+    y = x_prev + dt * v_prev
     gradient += m  / (dt * dt) * (x - y)
-    gradient_other += m  / (dt * dt) * (x_other - y)
     hessian += m / (dt * dt) * wp.identity(3, dtype=wp.float64)
 
     # Gravity
     gradient += -m * gravity
-    gradient_other += -m * gravity
     # no hessian
 
-
-    return gradient, gradient_other, hessian
+    return gradient, hessian
 
 
 @wp.func
@@ -56,18 +48,17 @@ def elastic_gradient_hessian (
     vertex_idx: wp.int32,
     ele_idx: wp.int32,
     positions: wp.array(dtype=wp.vec3d),
+    volumes: wp.array(dtype=wp.float64),
     inv_Dm: wp.array(dtype=wp.mat33d),
     dDs_dx: wp.array2d(dtype=wp.mat33d),
     lame_mu: wp.float64,
     lame_lambda: wp.float64,
     elements: wp.array(dtype=wp.vec4i)
-# ) -> tuple[wp.vec3d, wp.mat33d]:
-):
+) -> tuple[wp.vec3d, wp.mat33d]:
     """
     Compute the gradient and hessian of the energy with respect to vertex positions of a specific element.
     """
     x = positions[vertex_idx]
-    x_other = x + wp.vec3d(wp.float64(DELTA), wp.float64(0.0), wp.float64(0.0))  # For finite difference check
     ele = elements[ele_idx]
     inv_D = inv_Dm[ele_idx]
 
@@ -77,25 +68,14 @@ def elastic_gradient_hessian (
     x2 = positions[ele[2]]
     x3 = positions[ele[3]]
 
-    x0_other = x_other if vertex_idx == ele[0] else positions[ele[0]]
-    x1_other = x_other if vertex_idx == ele[1] else positions[ele[1]]
-    x2_other = x_other if vertex_idx == ele[2] else positions[ele[2]]
-    x3_other = x_other if vertex_idx == ele[3] else positions[ele[3]]
-
     # Deformed shape matrix # TODO write out matmul and skip mat33d initialization for performance
     Ds = wp.matrix_from_cols(
         x0 - x3,
         x1 - x3,
         x2 - x3
     )
-    Ds_other = wp.matrix_from_cols(
-        x0_other - x3_other,
-        x1_other - x3_other,
-        x2_other - x3_other
-    )
     F = Ds * inv_D
-    F_other = Ds_other * inv_D
-    volume = wp.float64(1.0) / (wp.abs(wp.determinant(inv_D)) * wp.float64(6.0)) # TODO: could be optimized, or we precompute.
+    volume = volumes[ele_idx]
 
     ### Create derivatives of Ds after positions (constants)
     dF_dx = wp.zeros(shape=(3,), dtype=wp.mat33d) # shape should technically be 9x3, but we can store as 3 mat33d for simplicity
@@ -111,7 +91,6 @@ def elastic_gradient_hessian (
 
     ### Assemble gradient and hessian
     gradient = wp.vec3d()
-    gradient_other = wp.vec3d()  # For finite difference check
     hessian = wp.mat33d()
 
     # Elastic, stable Neo-hookean
@@ -120,43 +99,30 @@ def elastic_gradient_hessian (
     alpha = wp.float64(1.0) + wp.float64(0.75) * mu / lmbda
 
     J = wp.determinant(F)
-    J_other = wp.determinant(F_other)
     Ic = wp.trace(F * wp.transpose(F))
-    Ic_other = wp.trace(F_other * wp.transpose(F_other))
     Ft = wp.transpose(F)
     Finv = wp.inverse(F)
-    Finv_other = wp.inverse(F_other)
     FinvT = wp.transpose(Finv)
-    FinvT_other = wp.transpose(Finv_other)
     dPhi_dF = (
         mu * F * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) 
         + lmbda * (J - alpha) * J * FinvT
     )
-    dPhi_dF_other = (
-        mu * F_other * (wp.float64(1.0) - wp.float64(1.0) / (Ic_other + wp.float64(1.0))) 
-        + lmbda * (J_other - alpha) * J_other * FinvT_other
-    )
-
 
     # Sum up all contributions
     for i in range(3):
         for j in range(3):
-            gradient[0] += volume / wp.float64(4.0) * dPhi_dF[i, j] * dF_dx[0][i, j]
-            gradient[1] += volume / wp.float64(4.0) * dPhi_dF[i, j] * dF_dx[1][i, j]
-            gradient[2] += volume / wp.float64(4.0) * dPhi_dF[i, j] * dF_dx[2][i, j]
+            gradient[0] += volume * dPhi_dF[i, j] * dF_dx[0][i, j]
+            gradient[1] += volume * dPhi_dF[i, j] * dF_dx[1][i, j]
+            gradient[2] += volume * dPhi_dF[i, j] * dF_dx[2][i, j]
 
-            gradient_other[0] += volume / wp.float64(4.0) * dPhi_dF_other[i, j] * dF_dx[0][i, j]
-            gradient_other[1] += volume / wp.float64(4.0) * dPhi_dF_other[i, j] * dF_dx[1][i, j]
-            gradient_other[2] += volume / wp.float64(4.0) * dPhi_dF_other[i, j] * dF_dx[2][i, j]
-
-            hessian[i, j] += volume / wp.float64(4.0) * (
+            hessian[i, j] += volume * (
                 wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0))) * wp.trace(Ft * dF_dx[i]) * wp.trace(Ft * dF_dx[j])
                 + mu * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) * wp.trace(wp.transpose(dF_dx[i]) * dF_dx[j])
                 + lmbda * J * (wp.float64(2.0) * J - alpha) * wp.trace(Finv * dF_dx[i]) * wp.trace(Finv * dF_dx[j])
                 - lmbda * J * (J - alpha) * wp.trace(Finv * dF_dx[j] * Finv * dF_dx[i])
             )
 
-    return gradient, gradient_other, hessian
+    return gradient, hessian
 
 
 @wp.kernel
@@ -169,6 +135,7 @@ def accumulate_grad_hess (
     dDs_dx: wp.array2d(dtype=wp.mat33d),
 
     masses: wp.array(dtype=wp.float64),
+    volumes: wp.array(dtype=wp.float64),
     lame_mu: wp.float64,
     lame_lambda: wp.float64,
     damping_coefficient: wp.float64,
@@ -182,7 +149,6 @@ def accumulate_grad_hess (
     active_mask: wp.array(dtype=wp.bool),
 
     gradients: wp.array3d(dtype=wp.float64),
-    gradients_other: wp.array3d(dtype=wp.float64),
     hessians: wp.array4d(dtype=wp.float64)
 ) -> None:
     """
@@ -197,6 +163,7 @@ def accumulate_grad_hess (
         dDs_dx: Derivatives of Ds with respect to positions. Shape [4, 3, 3, 3], a 3x3 matrix for each vertex of the tetrahedron.
 
         masses: Element masses.
+        volumes: Element volumes.
         lame_mu: Lame parameter mu.
         lame_lambda: Lame parameter lambda.
 
@@ -227,8 +194,8 @@ def accumulate_grad_hess (
         return
 
     ### Compute gradients and hessians
-    grad_inertial, grad_other_inertia, hess_inertia = inertial_gradient_hessian(idx_v, idx_e, positions, old_positions, old_velocities, masses, gravity, dt)
-    grad_elastic, grad_other_elastic, hess_elastic = elastic_gradient_hessian(idx_v, idx_e, positions, inv_Dm, dDs_dx, lame_mu, lame_lambda, elements)
+    grad_inertial, hess_inertia = inertial_gradient_hessian(idx_v, idx_e, positions, old_positions, old_velocities, masses, gravity, dt)
+    grad_elastic, hess_elastic = elastic_gradient_hessian(idx_v, idx_e, positions, volumes, inv_Dm, dDs_dx, lame_mu, lame_lambda, elements)
     # Add damping
     grad_damping = damping_coefficient * hess_elastic * (positions[idx_v] - old_positions[idx_v]) / dt
     hess_damping = damping_coefficient * hess_elastic / dt
@@ -236,7 +203,6 @@ def accumulate_grad_hess (
     ### Accumulate results
     for k in range(3):
         gradients[idx_v, j, k] = grad_inertial[k] + grad_elastic[k] + grad_damping[k]
-        gradients_other[idx_v, j, k] = grad_other_inertia[k] + grad_other_elastic[k]
         for l in range(3):
             hessians[idx_v, j, k, l] = hess_inertia[k, l] + hess_elastic[k, l] + hess_damping[k, l]
 
@@ -303,21 +269,25 @@ def position_initialization (
 
 
 @wp.kernel
-def compute_element_masses (
+def compute_element_masses_volume (
     positions: wp.array(dtype=wp.vec3d),
     elements: wp.array(dtype=wp.vec4i),
     densities: wp.array(dtype=wp.float64),
 
-    masses: wp.array(dtype=wp.float64)
+    masses: wp.array(dtype=wp.float64),
+    volumes: wp.array(dtype=wp.float64)
 ) -> None:
     """
-    Compute mass per element from element densities.
+    Compute mass and volume per element from element densities.
 
     Args:
         positions: Vertex positions.
         elements: Mesh elements.
         densities: Element densities.
+
+    Outputs:
         masses: Output array for masses.
+        volumes: Output array for volumes.
     """
     i = wp.tid()
 
@@ -336,6 +306,7 @@ def compute_element_masses (
     )
     volume = wp.abs(wp.determinant(Dm)) / wp.float64(6.0)
     masses[i] = density * volume
+    volumes[i] = volume
 
     # Distribute mass equally to the four vertices, TODO: INEFFICIENT, CHANGE TO TILES
     # for k in range(4):
@@ -436,11 +407,12 @@ class VBDSolver:
         ### Compute mass per element from element densities
         n_elements = elements.shape[0]
         self.masses = wp.zeros(n_elements, dtype=wp.float64)
+        self.volumes = wp.zeros(n_elements, dtype=wp.float64)
         wp.launch(
-            compute_element_masses,
+            compute_element_masses_volume,
             dim=n_elements,
             inputs=[initial_positions, elements, densities],
-            outputs=[self.masses]
+            outputs=[self.masses, self.volumes]
         )
 
         ### Compute inverted undeformed/reference shape matrix for tetrahedrons.
@@ -503,10 +475,9 @@ class VBDSolver:
 
         # TODO: Lot of memory use, optimization possible
         gradients = wp.zeros((n_vertices, n_elements_per_vertex, 3), dtype=wp.float64)
-        gradients_other = wp.zeros((n_vertices, n_elements_per_vertex, 3), dtype=wp.float64)
         hessians = wp.zeros((n_vertices, n_elements_per_vertex, 3, 3), dtype=wp.float64)
 
-        MAX_ITER = 1000
+        MAX_ITER = 100
         for i in range(MAX_ITER):
             wp.launch(
                 accumulate_grad_hess,
@@ -514,11 +485,11 @@ class VBDSolver:
                 inputs=[
                     new_positions, self.old_positions, self.old_velocities, 
                     self.inv_Dm, self.dDs_dx, 
-                    self.masses, self.lame_mu, self.lame_lambda, self.damping_coefficient,
+                    self.masses, self.volumes, self.lame_mu, self.lame_lambda, self.damping_coefficient,
                     self.gravity, dt, 
                     self.elements, self.adj_v2e, self.color_groups, self.active_mask
                 ],
-                outputs=[gradients, gradients_other, hessians]
+                outputs=[gradients, hessians]
             )
             dx = wp.zeros((n_vertices, 3), dtype=wp.float64)
             wp.launch_tiled(
@@ -541,7 +512,7 @@ class VBDSolver:
         
         # breakpoint()
         if i == MAX_ITER - 1:
-            print("Warning: VBD solver did not converge within the maximum number of iterations.")
+            print(f"Warning: VBD solver did not converge within the maximum number of iterations. Final dx max: {abs(dx.numpy()).max()}")
 
         # print(f"Final dx in {i} iterations: {abs(dx.numpy()).max()}")
 
