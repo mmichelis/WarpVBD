@@ -269,8 +269,8 @@ def position_initialization (
     positions: wp.array(dtype=wp.vec3d),
     velocities: wp.array(dtype=wp.vec3d),
     gravity: wp.vec3d,
-    active_mask: wp.array(dtype=wp.bool),
     dt: wp.float64,
+    active_mask: wp.array(dtype=wp.bool),
     
     new_positions: wp.array(dtype=wp.vec3d)
 ) -> None:
@@ -472,13 +472,13 @@ class VBDSolver:
         n_vertices_per_color = self.color_groups.shape[1]
         n_elements_per_vertex = self.adj_v2e.shape[1]
         # Initial guess: explicit Euler
-        new_positions = wp.zeros_like(positions)
-        wp.launch(
-            position_initialization,
-            dim=n_vertices,
-            inputs=[positions, self.old_velocities, self.gravity, dt],
-            outputs=[new_positions]
-        )
+        new_positions = wp.clone(positions)
+        # wp.launch(
+        #     position_initialization,
+        #     dim=n_vertices,
+        #     inputs=[positions, self.old_velocities, self.gravity, dt, self.active_mask],
+        #     outputs=[new_positions]
+        # )
 
         # TODO: Lot of memory use, optimization possible
         gradients = wp.zeros((n_vertices, n_elements_per_vertex, 3), dtype=wp.float64)
