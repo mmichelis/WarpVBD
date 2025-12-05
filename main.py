@@ -106,7 +106,7 @@ def main (args):
     n_seconds = 1.0
     fps = 30
     n_timesteps = int(n_seconds * fps)
-    n_substeps = 10
+    n_substeps = 100
     dt = 1/fps/n_substeps
     print(f"Simulating {n_seconds}s of dynamics in {n_timesteps} timesteps of {n_substeps} substeps each (dt={dt:.6f}s).")
 
@@ -116,7 +116,7 @@ def main (args):
         adj_v2e=adj_v2e,
         color_groups=colors,
         densities=densities,
-        youngs_modulus=1e5,
+        youngs_modulus=5e5,
         poisson_ratio=0.4,
         active_mask=active_mask
     )
@@ -129,7 +129,7 @@ def main (args):
         end_time = time.time()
         print(f"---Timestep [{t:04d}/{n_timesteps}] ({1e3*dt*n_substeps:.1f}ms) in {1e3*(end_time - start_time):.3f}ms: Mean Positions: {solution.numpy().mean(axis=0)}")
 
-        render(solution.numpy(), elements.numpy(), filename=f"outputs/sim/vbd_simulation.pbrt_{t:03d}.png", spp=4)
+        render(solution.numpy(), elements.numpy(), filename=f"outputs/sim/vbd_simulation_{t:03d}.png", spp=4)
 
     # Render mp4
     export_mp4("outputs/sim/", "outputs/vbd_simulation.mp4", fps=fps)

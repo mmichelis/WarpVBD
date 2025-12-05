@@ -9,7 +9,8 @@ import time
 from _utils import voxel2hex, hex2tets
 from _renderer import PbrtRenderer, export_mp4
 from coloring import graph_coloring, compute_adjacency_dict
-import vbd_solver
+# import vbd_solver
+import vbd_solver_np as vbd_solver
 
 
 def render (vertices, elements, filename=None, spp=4):
@@ -93,11 +94,11 @@ def main (args):
     adj_v2e = wp.array(adj_v2e, dtype=wp.int32, device=device)
     colors = wp.array(colors, dtype=wp.int32, device=device)
     active_mask = wp.array(active_mask, dtype=wp.bool, device=device)
-    densities = wp.array(1000 * np.ones(num_elements), dtype=wp.float64, device=device)  # Uniform density
-    n_seconds = 1.0
-    fps = 30
+    densities = wp.array(1070 * np.ones(num_elements), dtype=wp.float64, device=device)  # Uniform density
+    n_seconds = 1.5
+    fps = 100
     n_timesteps = int(n_seconds * fps)
-    n_substeps = 100
+    n_substeps = 10
     dt = 1/fps/n_substeps
     print(f"Simulating {n_seconds}s of dynamics in {n_timesteps} timesteps of {n_substeps} substeps each (dt={dt:.6f}s).")
 
@@ -107,8 +108,8 @@ def main (args):
         adj_v2e=adj_v2e,
         color_groups=colors,
         densities=densities,
-        youngs_modulus=1e5,
-        poisson_ratio=0.4,
+        youngs_modulus=250e3,
+        poisson_ratio=0.45,
         damping_coefficient=0.0,
         active_mask=active_mask,
         gravity=wp.vec3d(0.0, 0.0, -9.81),
@@ -147,10 +148,10 @@ def main (args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--nx", type=int, default=1, help="Number of voxels in x direction")
-    parser.add_argument("--ny", type=int, default=1, help="Number of voxels in y direction")
-    parser.add_argument("--nz", type=int, default=1, help="Number of voxels in z direction")
-    parser.add_argument("--dx", type=float, default=0.1, help="Voxel size in x direction")
+    parser.add_argument("--nx", type=int, default=10, help="Number of voxels in x direction")
+    parser.add_argument("--ny", type=int, default=3, help="Number of voxels in y direction")
+    parser.add_argument("--nz", type=int, default=3, help="Number of voxels in z direction")
+    parser.add_argument("--dx", type=float, default=0.01, help="Voxel size in x direction")
     parser.add_argument("--dy", type=float, default=None, help="Voxel size in y direction")
     parser.add_argument("--dz", type=float, default=None, help="Voxel size in z direction")
     parser.add_argument("--visualize", action='store_true', help="Visualize option")
