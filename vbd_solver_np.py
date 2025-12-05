@@ -66,7 +66,7 @@ def elastic_gradient_hessian (
         x1 - x3,
         x2 - x3
     ], axis=1)
-    F = Ds * inv_D
+    F = Ds @ inv_D
     volume = volumes[ele_idx]
 
     ### Create derivatives of Ds after positions (constants)
@@ -77,9 +77,9 @@ def elastic_gradient_hessian (
         # mask = wp.float64(vertex_idx == ele[i])
         if vertex_idx == ele[i]:
             # Mask will only be true for one of the four vertices, sum up contributions in x, y, z
-            dF_dx[0] = dDs_dx[i][0] * inv_D
-            dF_dx[1] = dDs_dx[i][1] * inv_D
-            dF_dx[2] = dDs_dx[i][2] * inv_D
+            dF_dx[0] = dDs_dx[i][0] @ inv_D
+            dF_dx[1] = dDs_dx[i][1] @ inv_D
+            dF_dx[2] = dDs_dx[i][2] @ inv_D
 
 
     ### Assemble gradient and hessian
@@ -88,22 +88,22 @@ def elastic_gradient_hessian (
 
     # Elastic, St. Venant-Kirchhoff
     Ft = F.transpose()
-    E = 0.5 * (Ft * F - np.eye(3))
+    E = 0.5 * (Ft @ F - np.eye(3))
 
     # Sum up all contributions
     for i in range(3):
-        dEdxi = 0.5 * (Ft * dF_dx[i] + dF_dx[i].transpose() * F)
+        dEdxi = 0.5 * (Ft @ dF_dx[i] + dF_dx[i].transpose() @ F)
         gradient[i] = volume * (
             lame_lambda * np.trace(E) * np.trace(dEdxi)
-            + 2 * lame_mu * np.trace(dEdxi.transpose() * E)
+            + 2 * lame_mu * np.trace(dEdxi.transpose() @ E)
         )
         for j in range(3):
-            dEdxj = 0.5 * (Ft * dF_dx[j] + dF_dx[j].transpose() * F)
-            d2E_dxidxj = 0.5 * (dF_dx[i].transpose() * dF_dx[j] + dF_dx[j].transpose() * dF_dx[i])
+            dEdxj = 0.5 * (Ft @ dF_dx[j] + dF_dx[j].transpose() @ F)
+            d2E_dxidxj = 0.5 * (dF_dx[i].transpose() @ dF_dx[j] + dF_dx[j].transpose() @ dF_dx[i])
             
             hessian[i, j] += volume * (
                 lame_lambda * (np.trace(dEdxi) * np.trace(dEdxj) + np.trace(E) * np.trace(d2E_dxidxj))
-                + 2 * lame_mu * (np.trace(dEdxi.transpose() * dEdxj) + np.trace(d2E_dxidxj.transpose() * E))
+                + 2 * lame_mu * (np.trace(dEdxi.transpose() @ dEdxj) + np.trace(d2E_dxidxj.transpose() @ E))
             )
 
     return gradient, hessian
@@ -153,7 +153,7 @@ def accumulate_grad_hess (
                 grad_inertial, hess_inertia = inertial_gradient_hessian(idx_v, idx_e, positions, old_positions, old_velocities, masses, gravity, dt)
                 grad_elastic, hess_elastic = elastic_gradient_hessian(idx_v, idx_e, positions, volumes, inv_Dm, dDs_dx, lame_mu, lame_lambda, elements)
                 # Add damping
-                grad_damping = damping_coefficient * hess_elastic * (positions[idx_v] - old_positions[idx_v]) / dt
+                grad_damping = damping_coefficient * hess_elastic @ (positions[idx_v] - old_positions[idx_v]) / dt
                 hess_damping = damping_coefficient * hess_elastic / dt
 
                 ### Accumulate results
@@ -175,6 +175,7 @@ def solve_grad_hess (
         # Skip if vertex is not active
         if not active_mask[i]:
             continue
+
         dx[i] = np.linalg.solve(hessians[i], -gradients[i])
         
     return dx
@@ -343,9 +344,8 @@ class VBDSolver:
         #     outputs=[new_positions]
         # )
 
-        # TODO: Lot of memory use, optimization possible
-        gradients = np.zeros((n_vertices, n_elements_per_vertex, 3))
-        hessians = np.zeros((n_vertices, n_elements_per_vertex, 3, 3))
+        gradients = np.zeros((n_vertices, 3))
+        hessians = np.zeros((n_vertices, 3, 3))
 
         hist_dx = []
         MAX_ITER = 100
@@ -362,7 +362,7 @@ class VBDSolver:
             dx = solve_grad_hess(gradients, hessians, self.active_mask, dx)
 
             new_positions += dx
-            # print(abs(dx.numpy()).max())
+            print(abs(dx.numpy()).max())
             # breakpoint()
             hist_dx.append(abs(dx).mean())
             if abs(dx).max() < 1e-9:
