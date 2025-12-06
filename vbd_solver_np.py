@@ -8,6 +8,13 @@ import warp as wp
 EPS = 1e-12
 MAX_ELEMENTS_PER_VERTEX = 128
 
+diljk = np.zeros([3,3,3,3])
+for i in range(3):
+    for j in range(3):
+        for k in range(3):
+            for l in range(3):
+                diljk[i,j,k,l] = 1.0 if (i == l and j == k) else 0.0
+diljk = diljk.reshape(9,9)
 
 def inertial_gradient_hessian (
     vertex_idx,
@@ -89,6 +96,33 @@ def elastic_gradient_hessian (
     # Elastic, St. Venant-Kirchhoff
     Ft = F.transpose()
     E = 0.5 * (Ft @ F - np.eye(3))
+    Et = E.transpose()
+    trE = np.trace(E)
+
+    dE_dF = np.zeros([3,3,3,3])
+    dEt_dF = np.zeros([3,3,3,3])
+    for i in range(3):
+        for j in range(3):
+            for k in range(3):
+                for l in range(3):
+                    if i == l:
+                        dE_dF[i,j,k,l] += 0.5 * F[k, j]
+                        dEt_dF[i,j,k,l] += 0.5 * F[j, k]
+                    if j == l:
+                        dE_dF[i,j,k,l] += 0.5 * F[i, k]
+                        dEt_dF[i,j,k,l] += 0.5 * F[k, i]
+
+    dphi_dF2 = (
+        0.5 * lame_lambda * (
+            0.5 * (F + Ft).reshape(9,1) @ (F + Ft).reshape(1,9) 
+            + trE * (np.eye(9) + diljk)
+        ) + lame_mu * (
+            np.einsum('ka, lamn -> klmn', F, dE_dF).reshape(9,9)
+            + np.einsum('bk, blmn -> klmn', F, dE_dF).reshape(9,9)
+            + np.einsum('km, ln -> klmn', np.eye(3), E).reshape(9,9)
+            + np.einsum('kn, ml -> klmn', np.eye(3), E).reshape(9,9)
+        )
+    )
 
     # Sum up all contributions
     for i in range(3):
@@ -97,14 +131,27 @@ def elastic_gradient_hessian (
             lame_lambda * np.trace(E) * np.trace(dEdxi)
             + 2 * lame_mu * np.trace(dEdxi.transpose() @ E)
         )
+        gradient_ = volume * (
+            0.5 * lame_lambda * trE * (F + Ft)
+            + lame_mu * (F @ Et + Ft @ E)
+        ).reshape(1,9) @ dF_dx[i].reshape(9,1)
+
+        assert abs(gradient[i] - gradient_).max() < 1e-6, f"Gradient mismatch: {gradient[i]} vs {gradient_}"
+
         for j in range(3):
             dEdxj = 0.5 * (Ft @ dF_dx[j] + dF_dx[j].transpose() @ F)
             d2E_dxidxj = 0.5 * (dF_dx[i].transpose() @ dF_dx[j] + dF_dx[j].transpose() @ dF_dx[i])
             
-            hessian[i, j] += volume * (
+            hessian[i, j] = volume * (
                 lame_lambda * (np.trace(dEdxi) * np.trace(dEdxj) + np.trace(E) * np.trace(d2E_dxidxj))
                 + 2 * lame_mu * (np.trace(dEdxi.transpose() @ dEdxj) + np.trace(d2E_dxidxj.transpose() @ E))
             )
+
+            hessian_ = (volume * dF_dx[i].reshape(1,9) @ dphi_dF2 @ dF_dx[j].reshape(9,1))[0,0]
+
+            # assert abs(hessian[i, j] - hessian_).max() < 1e0, f"Hessian mismatch: {hessian[i, j]} vs {hessian_}"
+            if abs(hessian[i, j] - hessian_).max() > 1e0:
+                print(f"Hessian mismatch: {hessian[i, j]} vs {hessian_}")
 
     return gradient, hessian
 
