@@ -557,12 +557,12 @@ class VBDSolver:
         n_elements_per_vertex = self.adj_v2e.shape[1]
         # Initial guess: explicit Euler
         new_positions = wp.clone(positions)
-        # wp.launch(
-        #     position_initialization,
-        #     dim=n_vertices,
-        #     inputs=[positions, self.old_velocities, self.gravity, dt, self.active_mask],
-        #     outputs=[new_positions]
-        # )
+        wp.launch(
+            position_initialization,
+            dim=n_vertices,
+            inputs=[positions, self.old_velocities, self.gravity, dt, self.active_mask],
+            outputs=[new_positions]
+        )
 
         # TODO: Lot of memory use, optimization possible
         gradients = wp.zeros((n_vertices, n_elements_per_vertex, 3), dtype=wp.float64, device=self.device)
@@ -603,8 +603,9 @@ class VBDSolver:
                 outputs=[new_positions],
                 device=self.device
             )
-            # print(abs(dx.numpy()).max())
-            # breakpoint()
+            wp.synchronize_device(self.device)
+            print(abs(dx.numpy()).max())
+            breakpoint()
             hist_dx.append(abs(dx.numpy()).mean())
             if abs(dx.numpy()).max() < 1e-9:
                 break

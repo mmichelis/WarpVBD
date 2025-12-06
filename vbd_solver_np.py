@@ -362,10 +362,10 @@ class VBDSolver:
             dx = solve_grad_hess(gradients, hessians, self.active_mask, dx)
 
             new_positions += dx
-            print(abs(dx.numpy()).max())
+            print(abs(dx).max())
             # breakpoint()
             hist_dx.append(abs(dx).mean())
-            if abs(dx).max() < 1e-9:
+            if abs(dx).max() < 1e-6:
                 break
         
         # breakpoint()
@@ -385,12 +385,12 @@ class VBDSolver:
         # plt.close(fig)
 
         # Discretize velocities, implicit Euler
-        self.old_velocities = (new_positions - positions) / dt
+        self.old_velocities = (new_positions - self.old_positions) / dt
         # Set old positions for next velocities computation
-        self.old_positions = new_positions
+        self.old_positions = np.copy(new_positions)
 
-        # Check if nan because hessian singlar TODO
+        # Check if nan because hessian singular TODO
         # print(f"All not nan: {wp.isnan(new_positions)}")
 
-        return new_positions
+        return wp.array(new_positions)
 
