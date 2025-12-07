@@ -126,32 +126,13 @@ def elastic_gradient_hessian (
 
     # Sum up all contributions
     for i in range(3):
-        dEdxi = 0.5 * (Ft @ dF_dx[i] + dF_dx[i].transpose() @ F)
         gradient[i] = volume * (
-            lame_lambda * np.trace(E) * np.trace(dEdxi)
-            + 2 * lame_mu * np.trace(dEdxi.transpose() @ E)
-        )
-        gradient_ = volume * (
             0.5 * lame_lambda * trE * (F + Ft)
             + lame_mu * (F @ Et + Ft @ E)
         ).reshape(1,9) @ dF_dx[i].reshape(9,1)
 
-        assert abs(gradient[i] - gradient_).max() < 1e-6, f"Gradient mismatch: {gradient[i]} vs {gradient_}"
-
         for j in range(3):
-            dEdxj = 0.5 * (Ft @ dF_dx[j] + dF_dx[j].transpose() @ F)
-            d2E_dxidxj = 0.5 * (dF_dx[i].transpose() @ dF_dx[j] + dF_dx[j].transpose() @ dF_dx[i])
-            
-            hessian[i, j] = volume * (
-                lame_lambda * (np.trace(dEdxi) * np.trace(dEdxj) + np.trace(E) * np.trace(d2E_dxidxj))
-                + 2 * lame_mu * (np.trace(dEdxi.transpose() @ dEdxj) + np.trace(d2E_dxidxj.transpose() @ E))
-            )
-
-            hessian_ = (volume * dF_dx[i].reshape(1,9) @ dphi_dF2 @ dF_dx[j].reshape(9,1))[0,0]
-
-            # assert abs(hessian[i, j] - hessian_).max() < 1e0, f"Hessian mismatch: {hessian[i, j]} vs {hessian_}"
-            if abs(hessian[i, j] - hessian_).max() > 1e0:
-                print(f"Hessian mismatch: {hessian[i, j]} vs {hessian_}")
+            hessian[i, j] = (volume * dF_dx[i].reshape(1,9) @ dphi_dF2 @ dF_dx[j].reshape(9,1))[0,0]
 
     return gradient, hessian
 
@@ -224,6 +205,7 @@ def solve_grad_hess (
             continue
 
         dx[i] = np.linalg.solve(hessians[i], -gradients[i])
+        assert np.linalg.norm(hessians[i] @ dx[i] + gradients[i]) < 1e-12, "Linear solve did not converge!"
         
     return dx
 
@@ -383,7 +365,7 @@ class VBDSolver:
         n_vertices_per_color = self.color_groups.shape[1]
         n_elements_per_vertex = self.adj_v2e.shape[1]
         # Initial guess: explicit Euler
-        new_positions = np.copy(positions)
+        new_positions = np.copy(positions) + self.active_mask.reshape(-1,1) * (dt * self.old_velocities + dt * dt * self.gravity)
         # wp.launch(
         #     position_initialization,
         #     dim=n_vertices,
@@ -391,12 +373,13 @@ class VBDSolver:
         #     outputs=[new_positions]
         # )
 
-        gradients = np.zeros((n_vertices, 3))
-        hessians = np.zeros((n_vertices, 3, 3))
 
-        hist_dx = []
+        hist = {"dx": [], "grad": []}
         MAX_ITER = 100
         for i in range(MAX_ITER):
+            gradients = np.zeros((n_vertices, 3))
+            hessians = np.zeros((n_vertices, 3, 3))
+
             gradients, hessians = accumulate_grad_hess(
                     new_positions, self.old_positions, self.old_velocities, 
                     self.inv_Dm, self.dDs_dx, 
@@ -409,10 +392,11 @@ class VBDSolver:
             dx = solve_grad_hess(gradients, hessians, self.active_mask, dx)
 
             new_positions += dx
-            print(abs(dx).max())
-            # breakpoint()
-            hist_dx.append(abs(dx).mean())
-            if abs(dx).max() < 1e-6:
+            print(f"Iteration {i}: Maximum gradient: {abs(gradients).max():.4e} and \tMaximum dx: {abs(dx).max():.2e}")
+            hist["dx"].append(abs(dx).mean())
+            hist["grad"].append(abs(gradients).mean())
+            # if abs(dx).max() < 1e-6:
+            if abs(gradients).max() < 1e-6:
                 break
         
         # breakpoint()
@@ -421,15 +405,25 @@ class VBDSolver:
 
         # print(f"Final dx in {i} iterations: {abs(dx.numpy()).max()}")
 
-        # fig, ax = plt.subplots(figsize=(3,2))
-        # ax.plot(np.array(hist_dx))
-        # ax.set_xlabel("Iteration (-)")
-        # ax.set_ylabel("Average dx (m)")
-        # ax.grid()
-        # ax.set_xlim(0, len(hist_dx))
-        # ax.set_yscale("log")
-        # fig.savefig("outputs/vbd_convergence.png", dpi=300, bbox_inches='tight')
-        # plt.close(fig)
+        fig, axs = plt.subplots(1, 2, figsize=(6,2))
+        plt.subplots_adjust(wspace=0.4)
+
+        axs[0].plot(np.array(hist["dx"]))
+        axs[0].set_xlabel("Iteration (-)")
+        axs[0].set_ylabel("Mean dx (m)")
+        axs[0].grid()
+        axs[0].set_xlim(0, len(hist["dx"]))
+        axs[0].set_yscale("log")
+
+        axs[1].plot(np.array(hist["grad"]))
+        axs[1].set_xlabel("Iteration (-)")
+        axs[1].set_ylabel("Mean grad norm (N)")
+        axs[1].grid()
+        axs[1].set_xlim(0, len(hist["grad"]))
+        axs[1].set_yscale("log")
+
+        fig.savefig("outputs/vbd_convergence.png", dpi=300, bbox_inches='tight')
+        plt.close(fig)
 
         # Discretize velocities, implicit Euler
         self.old_velocities = (new_positions - self.old_positions) / dt
