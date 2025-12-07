@@ -9,8 +9,8 @@ import time
 from _utils import voxel2hex, hex2tets
 from _renderer import PbrtRenderer, export_mp4
 from coloring import graph_coloring, compute_adjacency_dict
-# import vbd_solver
-import vbd_solver_np as vbd_solver
+import vbd_solver
+# import vbd_solver_np as vbd_solver
 
 
 def render (vertices, elements, filename=None, spp=4):
@@ -108,7 +108,7 @@ def main (args):
         adj_v2e=adj_v2e,
         color_groups=colors,
         densities=densities,
-        youngs_modulus=250e3,
+        youngs_modulus=50e3,
         poisson_ratio=0.45,
         damping_coefficient=0.0,
         active_mask=active_mask,
@@ -140,6 +140,9 @@ def main (args):
         ax.ticklabel_format(axis='both', style='sci', scilimits=(0,0))
         fig.savefig("outputs/tip_displacement.png", dpi=300, bbox_inches='tight')
         plt.close(fig)
+
+    # Store as csv
+    np.savetxt("outputs/tip_positions.csv", tip_positions_np, delimiter=",")
 
     if args.visualize:
         # Render mp4

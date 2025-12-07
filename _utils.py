@@ -26,9 +26,9 @@ def voxel2hex (voxels, dx, dy, dz):
 
     vertex_cnt = 0
     vertices = []
-    for i in range(nx+1):
+    for k in range(nz+1):
         for j in range(ny+1):
-            for k in range(nz+1):
+            for i in range(nx+1):
                 if vertex_flag[i,j,k] == 0:
                     vertex_flag[i,j,k] = vertex_cnt
                     vertices.append((dx * i, dy * j, dz * k))
@@ -36,19 +36,20 @@ def voxel2hex (voxels, dx, dy, dz):
 
     # Specific hexahedron face ordering
     elements = []
-    for i in range(nx):
+    for k in range(nz):
         for j in range(ny):
-            for k in range(nz):
+            for i in range(nx):
                 if voxels[i,j,k]:
                     elements.append([
                         vertex_flag[i,j,k],
-                        vertex_flag[i,j+1,k],
-                        vertex_flag[i+1,j+1,k],
                         vertex_flag[i+1,j,k],
+                        vertex_flag[i+1,j+1,k],
+                        vertex_flag[i,j+1,k],
+
                         vertex_flag[i,j,k+1],
-                        vertex_flag[i,j+1,k+1],
-                        vertex_flag[i+1,j+1,k+1],
                         vertex_flag[i+1,j,k+1],
+                        vertex_flag[i+1,j+1,k+1],
+                        vertex_flag[i,j+1,k+1],
                     ])
 
     vertices = np.stack(vertices, axis=0)
@@ -67,11 +68,11 @@ def hex2tets (hex_elements):
 
     tet_elements = np.zeros([n_tet, 4], dtype=int)
     for i in range(n_hex):
-        tet_elements[5*i] = np.array([hex_elements[i, 0], hex_elements[i, 1], hex_elements[i, 4], hex_elements[i, 3]])
-        tet_elements[5*i+1] = np.array([hex_elements[i, 1], hex_elements[i, 2], hex_elements[i, 6], hex_elements[i, 3]])
-        tet_elements[5*i+2] = np.array([hex_elements[i, 1], hex_elements[i, 3], hex_elements[i, 6], hex_elements[i, 4]])
-        tet_elements[5*i+3] = np.array([hex_elements[i, 1], hex_elements[i, 4], hex_elements[i, 6], hex_elements[i, 5]])
-        tet_elements[5*i+4] = np.array([hex_elements[i, 3], hex_elements[i, 4], hex_elements[i, 7], hex_elements[i, 6]])
+        tet_elements[5*i] = np.array([hex_elements[i, 0], hex_elements[i, 1], hex_elements[i, 3], hex_elements[i, 4]])
+        tet_elements[5*i+1] = np.array([hex_elements[i, 1], hex_elements[i, 2], hex_elements[i, 3], hex_elements[i, 6]])
+        tet_elements[5*i+2] = np.array([hex_elements[i, 1], hex_elements[i, 4], hex_elements[i, 5], hex_elements[i, 6]])
+        tet_elements[5*i+3] = np.array([hex_elements[i, 3], hex_elements[i, 4], hex_elements[i, 6], hex_elements[i, 7]])
+        tet_elements[5*i+4] = np.array([hex_elements[i, 1], hex_elements[i, 3], hex_elements[i, 4], hex_elements[i, 6]])
         
     return tet_elements
 
