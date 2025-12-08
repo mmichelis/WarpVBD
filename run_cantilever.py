@@ -12,7 +12,7 @@ import vbd_solver
 
 
 class CantileverSim:
-    def __init__ (self, nx=(10, 3, 3), dx=(0.01, 0.01, 0.01), density=1070, youngs_modulus=250e3, poissons_ratio=0.45, dx_tol=1e-9, device="cuda"):
+    def __init__ (self, nx=(10, 3, 3), dx=(0.01, 0.01, 0.01), density=1070, youngs_modulus=250e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=100, device="cuda"):
         ### Set up tetrahedral mesh
         voxels = np.ones(nx, dtype=bool)
         vertices, hex_elements = voxel2hex(voxels, *dx)
@@ -51,6 +51,7 @@ class CantileverSim:
             active_mask=active_mask,
             gravity=wp.vec3d(0.0, 0.0, -9.81),
             dx_tol=dx_tol,
+            max_iter=max_iter,
             device=device
         )
 

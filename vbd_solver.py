@@ -322,6 +322,7 @@ class VBDSolver:
             gravity: wp.vec3d = wp.vec3d(0.0, 0.0, -9.81),
 
             dx_tol: float=1e-9,
+            max_iter: int=100,
 
             device: str = "cpu"
         ) -> None:
@@ -341,6 +342,7 @@ class VBDSolver:
             gravity: Gravity vector.
             active_mask: Optional mask to indicate active vertices.
             dx_tol: Convergence tolerance for position updates.
+            max_iter: Maximum number of solver iterations per time step.
             device: Device to run the simulation on ("cpu" or "cuda").
         """
         self.initial_positions = initial_positions
@@ -352,6 +354,7 @@ class VBDSolver:
         self.damping_coefficient = damping_coefficient
         self.gravity = gravity
         self.dx_tol = dx_tol
+        self.max_iter = max_iter
         self.device = device
 
         if active_mask is not None:
@@ -478,8 +481,7 @@ class VBDSolver:
         )
 
         hist = {"dx": [], "grad": []}
-        MAX_ITER = 1000
-        for i in range(MAX_ITER):
+        for i in range(self.max_iter):
             dxs = wp.zeros_like(new_positions)
             grads = wp.zeros_like(new_positions)
             # Loop over colors
@@ -504,7 +506,7 @@ class VBDSolver:
             if abs(dxs.numpy().sum(1)).max() < dx_tol:
                 break
         
-        if i == MAX_ITER - 1:
+        if i == self.max_iter - 1:
             print(f"Warning: VBD solver did not converge within the maximum number of iterations. Final dx max: {abs(dxs.numpy()).max()}")
         # print(f"Iteration {i}: Maximum grad: {abs(grads.numpy()).max():.2e} \tMaximum dx: {abs(dxs.numpy()).max():.2e}")
 
