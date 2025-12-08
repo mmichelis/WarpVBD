@@ -6,7 +6,7 @@ import numpy as np
 import warp as wp
 
 EPS = 1e-12
-MAX_ELEMENTS_PER_VERTEX = 32 # TODO Not elegant, but simple for now
+MAX_ELEMENTS_PER_VERTEX = 64 # TODO Not elegant, but simple for now
 
 
 @wp.func
@@ -77,9 +77,6 @@ def elastic_gradient_hessian (
     F = Ds * inv_D
     volume = volumes[ele_idx]
 
-    # if vertex_idx == 1:
-    #     wp.printf("Vertex %d, Element %d: volume: %e, F = [[%e %e %e], [%e %e %e], [%e %e %e]]\n", vertex_idx, ele_idx, volume, F[0,0], F[0,1], F[0,2], F[1,0], F[1,1], F[1,2], F[2,0], F[2,1], F[2,2])
-
     ### Create derivatives of Ds after positions (constants)
     dF_dx = wp.zeros(shape=(3,), dtype=wp.mat33d) # shape should technically be 9x3, but we can store as 3 mat33d for simplicity
     # Trick with masks to avoid branching
@@ -97,52 +94,56 @@ def elastic_gradient_hessian (
     hessian = wp.mat33d()
 
     J = wp.determinant(F)
-    Ic = wp.trace(F * wp.transpose(F))
     Ft = wp.transpose(F)
+    Ic = wp.trace(Ft * F)
     Finv = wp.inverse(F)
     FinvT = wp.transpose(Finv)
 
-    ### Elastic, stable Neo-hookean
-    # mu = wp.float64(4.0) * lame_mu / wp.float64(3.0)                    # Adjusted mu for stable Neo-Hookean
-    # lmbda = lame_lambda + wp.float64(5.0) * lame_mu / wp.float64(6.0)   # Adjusted lambda for stable Neo-Hookean
-    # alpha = wp.float64(1.0) + wp.float64(0.75) * mu / lmbda
-    # dPhi_dF = (
-    #     mu * F * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) 
-    #     + lmbda * (J - alpha) * J * FinvT
-    # )
+    ### Stable Neo-Hookean
+    mu = wp.float64(4.0) * lame_mu / wp.float64(3.0)                    # Adjusted mu for stable Neo-Hookean
+    lmbda = lame_lambda + wp.float64(5.0) * lame_mu / wp.float64(6.0)   # Adjusted lambda for stable Neo-Hookean
+    alpha = wp.float64(1.0) + wp.float64(0.75) * mu / lmbda
+    dPhi_dF = (
+        mu * F * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) 
+        + lmbda * (J - alpha) * J * FinvT
+    )
 
-    # for i in range(3):
-    #     for j in range(3):
-    #         gradient[0] += volume * dPhi_dF[i, j] * dF_dx[0][i, j]
-    #         gradient[1] += volume * dPhi_dF[i, j] * dF_dx[1][i, j]
-    #         gradient[2] += volume * dPhi_dF[i, j] * dF_dx[2][i, j]
+    # if vertex_idx == 2:
+    #     wp.printf("Vertex %d, Element %d: volume: %e, mu: %e, lambda: %e, alpha: %e, F = [[%e %e %e], [%e %e %e], [%e %e %e]]\n", vertex_idx, ele_idx, volume, mu, lmbda, alpha, F[0,0], F[0,1], F[0,2], F[1,0], F[1,1], F[1,2], F[2,0], F[2,1], F[2,2])
 
-    #         hessian[i, j] += volume * (
-    #             wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0))) * wp.trace(Ft * dF_dx[i]) * wp.trace(Ft * dF_dx[j])
-    #             + mu * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) * wp.trace(wp.transpose(dF_dx[i]) * dF_dx[j])
-    #             + lmbda * J * (wp.float64(2.0) * J - alpha) * wp.trace(Finv * dF_dx[i]) * wp.trace(Finv * dF_dx[j])
-    #             - lmbda * J * (J - alpha) * wp.trace(Finv * dF_dx[j] * Finv * dF_dx[i])
-    #         )
+    for i in range(3):
+        gradient[i] = volume * wp.trace(wp.transpose(dPhi_dF) * dF_dx[i])
+        for j in range(3):
+            # gradient[0] += volume * dPhi_dF[i, j] * dF_dx[0][i, j]
+            # gradient[1] += volume * dPhi_dF[i, j] * dF_dx[1][i, j]
+            # gradient[2] += volume * dPhi_dF[i, j] * dF_dx[2][i, j]
+
+            hessian[i, j] += volume * (
+                wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0))) * wp.trace(Ft * dF_dx[i]) * wp.trace(Ft * dF_dx[j])
+                + mu * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) * wp.trace(wp.transpose(dF_dx[i]) * dF_dx[j])
+                + lmbda * J * (wp.float64(2.0) * J - alpha) * wp.trace(Finv * dF_dx[i]) * wp.trace(Finv * dF_dx[j])
+                - lmbda * J * (J - alpha) * wp.trace(Finv * dF_dx[j] * Finv * dF_dx[i])
+            )
 
 
     ### St. Venant-Kirchhoff
-    E = wp.float64(0.5) * (Ft * F - wp.identity(3, dtype=wp.float64))
-    for i in range(3):
-        dEdxi = wp.float64(0.5) * (Ft * dF_dx[i] + wp.transpose(dF_dx[i]) * F)
+    # E = wp.float64(0.5) * (Ft * F - wp.identity(3, dtype=wp.float64))
+    # for i in range(3):
+    #     dEdxi = wp.float64(0.5) * (Ft * dF_dx[i] + wp.transpose(dF_dx[i]) * F)
 
-        gradient[i] = volume * (
-            lame_lambda * wp.trace(E) * wp.trace(dEdxi)
-            + wp.float64(2.0) * lame_mu * wp.trace(wp.transpose(dEdxi) * E)
-        )
+    #     gradient[i] = volume * (
+    #         lame_lambda * wp.trace(E) * wp.trace(dEdxi)
+    #         + wp.float64(2.0) * lame_mu * wp.trace(wp.transpose(dEdxi) * E)
+    #     )
         
-        for j in range(3):
-            dEdxj = wp.float64(0.5) * (Ft * dF_dx[j] + wp.transpose(dF_dx[j]) * F)
-            d2E_dxidxj = wp.float64(0.5) * (wp.transpose(dF_dx[i]) * dF_dx[j] + wp.transpose(dF_dx[j]) * dF_dx[i])
+    #     for j in range(3):
+    #         dEdxj = wp.float64(0.5) * (Ft * dF_dx[j] + wp.transpose(dF_dx[j]) * F)
+    #         d2E_dxidxj = wp.float64(0.5) * (wp.transpose(dF_dx[i]) * dF_dx[j] + wp.transpose(dF_dx[j]) * dF_dx[i])
             
-            hessian[i, j] += volume * (
-                lame_lambda * (wp.trace(dEdxi) * wp.trace(dEdxj) + wp.trace(E) * wp.trace(d2E_dxidxj))
-                + wp.float64(2.0) * lame_mu * (wp.trace(wp.transpose(dEdxi) * dEdxj) + wp.trace(wp.transpose(d2E_dxidxj) * E))
-            )
+    #         hessian[i, j] += volume * (
+    #             lame_lambda * (wp.trace(dEdxi) * wp.trace(dEdxj) + wp.trace(E) * wp.trace(d2E_dxidxj))
+    #             + wp.float64(2.0) * lame_mu * (wp.trace(wp.transpose(dEdxi) * dEdxj) + wp.trace(wp.transpose(d2E_dxidxj) * E))
+    #         )
 
     return gradient, hessian
 
@@ -217,7 +218,7 @@ def solve_grad_hess (
     grad = wp.vec3d()
     hess = wp.mat33d()
 
-    for j in range(MAX_ELEMENTS_PER_VERTEX):
+    for j in range(adj_v2e.shape[1]):
         idx_e = adj_v2e[idx_v, j]
         if idx_e == -1:
             continue
@@ -229,6 +230,9 @@ def solve_grad_hess (
         grad_damping = damping_coefficient * hess_elastic * (positions[idx_v] - old_positions[idx_v]) / dt
         hess_damping = damping_coefficient * hess_elastic / dt
 
+        # if idx_v == 2:
+        #     wp.printf("Vertex %d, Element %d: grad_inertial = %e %e %e, grad_elastic = %e %e %e, grad_damping = %e %e %e\n", idx_v, idx_e, grad_inertial[0], grad_inertial[1], grad_inertial[2], grad_elastic[0], grad_elastic[1], grad_elastic[2], grad_damping[0], grad_damping[1], grad_damping[2])
+
         ### Accumulate results
         grad += grad_inertial + grad_elastic + grad_damping
         hess += hess_inertia + hess_elastic + hess_damping
@@ -237,7 +241,8 @@ def solve_grad_hess (
     grads[idx_v] = grad
     dxs[idx_v] = wp.inverse(hess) * (-grad)
     new_positions[idx_v] = positions[idx_v] + dxs[idx_v]
-    # wp.printf("Vertex %d: grad = %e %e %e, dx = %e %e %e\n", idx_v, grad[0], grad[1], grad[2], dxs[idx_v][0], dxs[idx_v][1], dxs[idx_v][2])
+    # if idx_v == 2:
+    #     wp.printf("Vertex %d: hess = [[%e %e %e], [%e %e %e], [%e %e %e]], grad = [%e %e %e], dx = [%e %e %e]\n", idx_v, hess[0,0], hess[0,1], hess[0,2], hess[1,0], hess[1,1], hess[1,2], hess[2,0], hess[2,1], hess[2,2], grad[0], grad[1], grad[2], dxs[idx_v][0], dxs[idx_v][1], dxs[idx_v][2])
 
 
 @wp.kernel
@@ -255,7 +260,7 @@ def position_initialization (
     if not active_mask[i]:
         return
 
-    new_positions[i] = positions[i] + velocities[i] * dt + gravity * dt * dt
+    new_positions[i] = positions[i] + velocities[i] * dt #+ gravity * dt * dt
 
 
 @wp.kernel
@@ -437,13 +442,12 @@ class VBDSolver:
         )
 
         hist = {"dx": [], "grad": []}
-        MAX_ITER = 100
+        MAX_ITER = 1000
         for i in range(MAX_ITER):
             dxs = wp.zeros_like(new_positions)
             grads = wp.zeros_like(new_positions)
             # Loop over colors
             for c in range(n_colors):
-                nonzeros_in_grad_before = np.sum((abs(grads.numpy()) > 1e-16).any(axis=1))
                 wp.synchronize_device(self.device)
                 wp.launch(
                     solve_grad_hess,
@@ -458,10 +462,7 @@ class VBDSolver:
                     outputs=[new_positions, grads, dxs],
                     device=self.device
                 )
-                n_verts_in_color = np.sum(self.color_groups[c].numpy() != -1)
-                nonzeros_in_grad_after = np.sum((abs(grads.numpy()) > 1e-16).any(axis=1))
-                print(f"Color {c+1}/{n_colors}, vertices: {n_verts_in_color}, nonzeros in grad before: {nonzeros_in_grad_before}, after: {nonzeros_in_grad_after}")
-            breakpoint()
+            # breakpoint()
              
             hist["dx"].append(abs(dxs.numpy()).mean())
             hist["grad"].append(abs(grads.numpy()).mean())
@@ -470,9 +471,9 @@ class VBDSolver:
         
         if i == MAX_ITER - 1:
             print(f"Warning: VBD solver did not converge within the maximum number of iterations. Final dx max: {abs(dxs.numpy()).max()}")
-        # print(f"Iteration {i}: Maximum dx: {abs(dxs.numpy()).max():.2e}")
+        print(f"Iteration {i}: Maximum grad: {abs(grads.numpy()).max():.2e} \tMaximum dx: {abs(dxs.numpy()).max():.2e}")
 
-        plot = False
+        plot = True
         if plot:
             fig, axs = plt.subplots(1, 2, figsize=(6,2))
             plt.subplots_adjust(wspace=0.4)
