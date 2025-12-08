@@ -6,7 +6,6 @@ import numpy as np
 import warp as wp
 
 EPS = 1e-12
-MAX_ELEMENTS_PER_VERTEX = 64 # TODO Not elegant, but simple for now
 
 
 @wp.func
@@ -36,8 +35,6 @@ def inertial_gradient_hessian (
     y = x_prev + dt * v_prev
     gradient += m  / (dt * dt) * (x - y)
     hessian += m / (dt * dt) * wp.identity(3, dtype=wp.float64)
-
-    # wp.printf("Vertex %d, Element %d: Inertial hessian = [[%e %e %e], [%e %e %e], [%e %e %e]], gradient = [%e %e %e]\n", vertex_idx, ele_idx, hessian[0,0], hessian[0,1], hessian[0,2], hessian[1,0], hessian[1,1], hessian[1,2], hessian[2,0], hessian[2,1], hessian[2,2], gradient[0], gradient[1], gradient[2])
 
     # Gravity
     gradient += -m * gravity
@@ -69,9 +66,6 @@ def elastic_gradient_hessian (
     x1 = positions[ele[1]]
     x2 = positions[ele[2]]
     x3 = positions[ele[3]]
-
-    # if vertex_idx == 21:
-    #     wp.printf("Vertex %d, Element %d: x0 = [%e %e %e], x1 = [%e %e %e], x2 = [%e %e %e], x3 = [%e %e %e]\n", vertex_idx, ele_idx, x0[0], x0[1], x0[2], x1[0], x1[1], x1[2], x2[0], x2[1], x2[2], x3[0], x3[1], x3[2])
 
     # Deformed shape matrix # TODO write out matmul and skip mat33d initialization for performance
     Ds = wp.matrix_from_cols(
@@ -113,17 +107,9 @@ def elastic_gradient_hessian (
         + lmbda * (J - alpha) * J * FinvT
     )
 
-    # if vertex_idx == 21:
-    #     wp.printf("Vertex %d, Element %d: volume: %e, mu: %e, lambda: %e, alpha: %e, F = [[%e %e %e], [%e %e %e], [%e %e %e]]\n", vertex_idx, ele_idx, volume, mu, lmbda, alpha, F[0,0], F[0,1], F[0,2], F[1,0], F[1,1], F[1,2], F[2,0], F[2,1], F[2,2])
-    #     wp.printf("Vertex %d, Element %d: Ds = [[%e %e %e], [%e %e %e], [%e %e %e]]\n", vertex_idx, ele_idx, Ds[0,0], Ds[0,1], Ds[0,2], Ds[1,0], Ds[1,1], Ds[1,2], Ds[2,0], Ds[2,1], Ds[2,2])
-
     for i in range(3):
         gradient[i] = volume * wp.trace(wp.transpose(dPhi_dF) * dF_dx[i])
         for j in range(3):
-            # gradient[0] += volume * dPhi_dF[i, j] * dF_dx[0][i, j]
-            # gradient[1] += volume * dPhi_dF[i, j] * dF_dx[1][i, j]
-            # gradient[2] += volume * dPhi_dF[i, j] * dF_dx[2][i, j]
-
             hessian[i, j] = volume * (
                 wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0))) * wp.trace(Ft * dF_dx[i]) * wp.trace(Ft * dF_dx[j])
                 + mu * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) * wp.trace(wp.transpose(dF_dx[i]) * dF_dx[j])
@@ -236,23 +222,14 @@ def solve_grad_hess (
         grad_damping = damping_coefficient * hess_elastic * (positions[idx_v] - old_positions[idx_v]) / dt
         hess_damping = damping_coefficient * hess_elastic / dt
 
-        # if idx_v == 21:
-        #     wp.printf("Vertex %d, Element %d: grad_inertial = %e %e %e, grad_elastic = %e %e %e\n", idx_v, idx_e, grad_inertial[0], grad_inertial[1], grad_inertial[2], grad_elastic[0], grad_elastic[1], grad_elastic[2])
-        #     wp.printf("Vertex %d, Element %d: hess_inertia = [[%e %e %e], [%e %e %e], [%e %e %e]], hess_elastic = [[%e %e %e], [%e %e %e], [%e %e %e]]\n", idx_v, idx_e, hess_inertia[0,0], hess_inertia[0,1], hess_inertia[0,2], hess_inertia[1,0], hess_inertia[1,1], hess_inertia[1,2], hess_inertia[2,0], hess_inertia[2,1], hess_inertia[2,2], hess_elastic[0,0], hess_elastic[0,1], hess_elastic[0,2], hess_elastic[1,0], hess_elastic[1,1], hess_elastic[1,2], hess_elastic[2,0], hess_elastic[2,1], hess_elastic[2,2])
-        #     wp.printf("Vertex %d, Element %d: total_grad = [%e %e %e], total_hess = [[%e %e %e], [%e %e %e], [%e %e %e]]\n", idx_v, idx_e, (grad_inertial + grad_elastic + grad_damping)[0], (grad_inertial + grad_elastic + grad_damping)[1], (grad_inertial + grad_elastic + grad_damping)[2], (hess_inertia + hess_elastic + hess_damping)[0,0], (hess_inertia + hess_elastic + hess_damping)[0,1], (hess_inertia + hess_elastic + hess_damping)[0,2], (hess_inertia + hess_elastic + hess_damping)[1,0], (hess_inertia + hess_elastic + hess_damping)[1,1], (hess_inertia + hess_elastic + hess_damping)[1,2], (hess_inertia + hess_elastic + hess_damping)[2,0], (hess_inertia + hess_elastic + hess_damping)[2,1], (hess_inertia + hess_elastic + hess_damping)[2,2])
-
         ### Accumulate results
         grad += grad_inertial + grad_elastic + grad_damping
         hess += hess_inertia + hess_elastic + hess_damping
-
-    # wp.printf("Solving for vertex %d\n", idx_v)
 
     # Local linear system solve per vertex
     grads[idx_v] = grad
     dxs[idx_v] = wp.inverse(hess) * (-grad)
     new_positions[idx_v] = positions[idx_v] + dxs[idx_v]
-    # if idx_v == 21:
-    #     wp.printf("Vertex %d: hess = [[%e %e %e], [%e %e %e], [%e %e %e]], grad = [%e %e %e], dx = [%e %e %e]\n", idx_v, hess[0,0], hess[0,1], hess[0,2], hess[1,0], hess[1,1], hess[1,2], hess[2,0], hess[2,1], hess[2,2], grad[0], grad[1], grad[2], dxs[idx_v][0], dxs[idx_v][1], dxs[idx_v][2])
 
 
 @wp.kernel
@@ -472,7 +449,6 @@ class VBDSolver:
                     outputs=[new_positions, grads, dxs],
                     device=self.device
                 )
-            # breakpoint()
              
             hist["dx"].append(abs(dxs.numpy()).mean())
             hist["grad"].append(abs(grads.numpy()).mean())
