@@ -67,11 +67,11 @@ def main (args):
 
     ### Perform graph coloring
     start_time = time.time()
-    adjacency, maximal_degree = compute_adjacency_dict(elements)
+    adjacency, vertex_valence = compute_adjacency_dict(elements)
     vertex_coloring, color_groups = graph_coloring(adjacency)
     end_time = time.time()
     print(f"Assigned {len(color_groups)} colors in {(end_time - start_time)*1000:.4f}ms.")
-    print(f"Maximal vertex degree: {maximal_degree}")
+    print(f"Vertex valence: {vertex_valence}")
     # Convert color groups to full array
     n_colors = len(color_groups)
     max_group_size = max(len(g) for g in color_groups.values())
@@ -84,16 +84,20 @@ def main (args):
     # Find an adjacency mapping from vertex -> neighboring elements
     num_vertices = vertices.shape[0]
     num_elements = elements.shape[0]
-    adj_v2e = np.full((num_vertices, maximal_degree), -1, dtype=int)
+
+    adj_v2e_list = [[] for _ in range(num_vertices)]
+    max_incident_elements = 0
     for i, ele in enumerate(elements):
         for vertex in ele:
-            # Find the first available slot
-            for j in range(maximal_degree):
-                if adj_v2e[vertex, j] == -1:
-                    adj_v2e[vertex, j] = i
-                    break
-            
-            assert j < maximal_degree, "Maximal degree exceeded!"
+            adj_v2e_list[vertex].append(i)
+            max_incident_elements = max(max_incident_elements, len(adj_v2e_list[vertex]))
+    print(f"Max incident elements per vertex: {max_incident_elements}")
+    # Create fixed-size adjacency array
+    adj_v2e = np.full((num_vertices, max_incident_elements), -1, dtype=int)
+    for vertex in range(num_vertices):
+        for j, ele_idx in enumerate(adj_v2e_list[vertex]):
+            adj_v2e[vertex, j] = ele_idx
+
 
     ### Begin the solve
     device = "cuda"
@@ -118,7 +122,7 @@ def main (args):
         color_groups=colors,
         densities=densities,
         youngs_modulus=250e3,
-        poisson_ratio=0.49,
+        poisson_ratio=0.45,
         damping_coefficient=0.0,
         active_mask=active_mask,
         gravity=wp.vec3d(0.0, 0.0, -9.81),
