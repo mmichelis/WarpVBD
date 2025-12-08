@@ -52,6 +52,8 @@ def main (args):
     elements = hex2tets(hex_elements)
     points = [wp.vec3(point) for point in vertices]
     tet_indices = elements.flatten().tolist()
+    num_vertices = vertices.shape[0]
+    num_elements = elements.shape[0]
     print(f"Generated tetrahedral mesh with {len(points)} vertices and {len(elements)} elements.")
 
     # Set active mask
@@ -62,7 +64,6 @@ def main (args):
             active_mask[i] = False
         elif vertices[i,0] > (args.nx * args.dx - 1e-3):
             tip_idx.append(i)
-    # active_mask = np.ones((vertices.shape[0],), dtype=bool)
     print(f"Active vertices: {np.sum(active_mask)}/{vertices.shape[0]}")
 
     ### Perform graph coloring
@@ -80,11 +81,7 @@ def main (args):
         group = color_groups[c]
         colors[c, :len(group)] = group
 
-
     # Find an adjacency mapping from vertex -> neighboring elements
-    num_vertices = vertices.shape[0]
-    num_elements = elements.shape[0]
-
     adj_v2e_list = [[] for _ in range(num_vertices)]
     max_incident_elements = 0
     for i, ele in enumerate(elements):

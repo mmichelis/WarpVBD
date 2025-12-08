@@ -83,8 +83,7 @@ def graph_coloring (adjacency: dict) -> np.ndarray:
                 color_groups[color].append(vertex)
                 break
 
-    print(f"Assigned {coloring.max() + 1} colors.")
-    print(f"Color distribution: {np.bincount(coloring)}")
+    print(f"Assigned {coloring.max() + 1} colors. Color distribution: {np.bincount(coloring)}")
 
     return coloring, color_groups
 

@@ -247,7 +247,7 @@ def position_initialization (
     if not active_mask[i]:
         return
 
-    new_positions[i] = positions[i] + velocities[i] * dt #+ gravity * dt * dt
+    new_positions[i] = positions[i] + velocities[i] * dt + gravity * dt * dt
 
 
 @wp.kernel
@@ -399,6 +399,14 @@ class VBDSolver:
         self.dDs_dx = wp.array(dDs_dx, dtype=wp.mat33d, device=device)
 
 
+    def reset (self) -> None:
+        """
+        Reset the solver state to the initial conditions.
+        """
+        self.old_positions = wp.clone(self.initial_positions)
+        self.old_velocities = wp.zeros_like(self.initial_positions)
+
+
     def step (
         self, 
         positions: wp.array(dtype=wp.vec3d),
@@ -452,14 +460,14 @@ class VBDSolver:
              
             hist["dx"].append(abs(dxs.numpy()).mean())
             hist["grad"].append(abs(grads.numpy()).mean())
-            if abs(dxs.numpy().sum(1)).max() < 1e-12:
+            if abs(dxs.numpy().sum(1)).max() < 1e-9:
                 break
         
         if i == MAX_ITER - 1:
             print(f"Warning: VBD solver did not converge within the maximum number of iterations. Final dx max: {abs(dxs.numpy()).max()}")
-        print(f"Iteration {i}: Maximum grad: {abs(grads.numpy()).max():.2e} \tMaximum dx: {abs(dxs.numpy()).max():.2e}")
+        # print(f"Iteration {i}: Maximum grad: {abs(grads.numpy()).max():.2e} \tMaximum dx: {abs(dxs.numpy()).max():.2e}")
 
-        plot = True
+        plot = False
         if plot:
             fig, axs = plt.subplots(1, 2, figsize=(6,2))
             plt.subplots_adjust(wspace=0.4)
