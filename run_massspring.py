@@ -1,4 +1,4 @@
-### Cantilever beam simulation falling under gravity.
+### Mass Spring System simulation falling under gravity.
 
 import numpy as np
 import warp as wp
@@ -12,11 +12,18 @@ from _renderer import PbrtRenderer, export_mp4
 import vbd_solver
 
 
-class CantileverSim:
-    def __init__ (self, nx=(10, 3, 3), dx=(0.01, 0.01, 0.01), density=1070, youngs_modulus=250e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=100, device="cuda"):
+class MassSpringSim:
+    """
+    Mass Spring System Simulation, where the mass is standardized as a 1m x 1m x 1m cube of 1kg. 
+    """
+    def __init__ (self, nx=11, density=1, youngs_modulus=10e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=100, device="cuda"):
         ### Set up tetrahedral mesh
-        voxels = np.ones(nx, dtype=bool)
-        vertices, hex_elements = voxel2hex(voxels, *dx)
+        dx = 1.0/nx
+        voxels = np.ones((nx, nx, 2*nx), dtype=bool)
+        voxels[:,:,nx:] = False
+        voxels[int(nx//2):int(nx//2)+1,int(nx//2):int(nx//2)+1,nx:] = True
+        vertices, hex_elements = voxel2hex(voxels, dx, dx, dx)
+        vertices[:,:2] -= vertices.mean(axis=0)[:2]
         elements = hex2tets(hex_elements)
         n_vertices = vertices.shape[0]
         n_elements = elements.shape[0]
@@ -28,9 +35,9 @@ class CantileverSim:
         active_mask = np.ones((vertices.shape[0],), dtype=bool)
         tip_idx = []
         for i in range(vertices.shape[0]):
-            if vertices[i,0] < 1e-3:
+            if vertices[i,2] > 2*nx*dx-1e-3:
                 active_mask[i] = False
-            elif vertices[i,0] > (nx[0] * dx[0] - 1e-3):
+            elif vertices[i,2] < 1e-3:
                 tip_idx.append(i)
         self.tip_idx = tip_idx
         print(f"Active vertices: {np.sum(active_mask)}/{vertices.shape[0]}")
@@ -82,11 +89,11 @@ class CantileverSim:
             'light_map': 'uffizi-large.exr',
             'sample': spp,
             'max_depth': 2,
-            'camera_pos': (0.3, -0.75, 0.3),   # Position of camera
+            'camera_pos': (0.0, -0.75, 0.3),   # Position of camera
             'camera_lookat': (0.0, 0.25, 0.1),     # Position that camera looks at
         }
         transforms=[
-            ('s', 2),
+            ('s', 0.1),
             ('t', [0, 0, 0.15])
         ]
         renderer = PbrtRenderer(options)
@@ -112,19 +119,14 @@ class CantileverSim:
 
 
 def main (args):
-    ### Set up tetrahedral mesh
-    sim = CantileverSim(
-        nx=(args.nx, args.ny, args.nz), 
-        dx=(args.dx, args.dy, args.dz), 
-        density=1070, youngs_modulus=250e3, poissons_ratio=0.45,
-        dx_tol=1e-9, device="cuda"
-    )
+    # Set up simulation
+    sim = MassSpringSim(nx=args.nx, dx_tol=1e-6, max_iter=1000, device="cuda")
 
     ### Begin the solve
-    n_seconds = 1.5
-    fps = 100
+    n_seconds = 2.0
+    fps = 50
     n_timesteps = int(n_seconds * fps)
-    n_substeps = 10
+    n_substeps = 5
     dt = 1/fps/n_substeps
 
     tip_positions = []
@@ -139,7 +141,7 @@ def main (args):
         print(f"---Timestep [{t:04d}/{n_timesteps}] ({1e3*dt*n_substeps:.1f}ms) in {1e3*(end_time - start_time):.3f}ms: Mean Positions: {solution.numpy().mean(axis=0)}")
 
         if args.render:
-            sim.render(solution.numpy(), filename=f"outputs/sim/cantilever_{t:03d}.png", spp=64)
+            sim.render(solution.numpy(), filename=f"outputs/sim/msd_{t:03d}.png", spp=4)
 
         # Plot Tip Displacements
         fig, ax = plt.subplots(figsize=(3,2))
@@ -150,31 +152,22 @@ def main (args):
         ax.grid()
         ax.set_xlim(0, n_seconds)
         ax.ticklabel_format(axis='both', style='sci', scilimits=(0,0))
-        fig.savefig("outputs/tip_displacement.png", dpi=300, bbox_inches='tight')
+        fig.savefig("outputs/tip_msd.png", dpi=300, bbox_inches='tight')
         plt.close(fig)
 
     # Store as csv
-    np.savetxt("outputs/tip_positions.csv", tip_positions_np, delimiter=",")
+    np.savetxt("outputs/tip_msd.csv", tip_positions_np, delimiter=",")
 
     if args.render:
         # Render mp4
-        export_mp4("outputs/sim/", "outputs/cantilever.mp4", fps=int(0.25*fps), name_prefix="cantilever_")
+        export_mp4("outputs/sim/", "outputs/msd.mp4", fps=int(0.25*fps), name_prefix="msd_")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--nx", type=int, default=10, help="Number of voxels in x direction")
-    parser.add_argument("--ny", type=int, default=3, help="Number of voxels in y direction")
-    parser.add_argument("--nz", type=int, default=3, help="Number of voxels in z direction")
+    parser.add_argument("--nx", type=int, default=11, help="Number of voxels in x direction")
     parser.add_argument("--dx", type=float, default=0.01, help="Voxel size in x direction")
-    parser.add_argument("--dy", type=float, default=None, help="Voxel size in y direction")
-    parser.add_argument("--dz", type=float, default=None, help="Voxel size in z direction")
     parser.add_argument("--render", action='store_true', help="Visualize option")
     args = parser.parse_args()
-
-    if args.dy is None:
-        args.dy = args.dx
-    if args.dz is None:
-        args.dz = args.dx
     
     main(args)
