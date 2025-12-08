@@ -71,10 +71,15 @@ def elastic_gradient_hessian (
     x3 = positions[ele[3]]
 
     # Deformed shape matrix # TODO write out matmul and skip mat33d initialization for performance
-    Ds = wp.matrix_from_cols(
-        x0 - x3,
-        x1 - x3,
-        x2 - x3
+    # Ds = wp.matrix_from_cols(
+    #     x0 - x3,
+    #     x1 - x3,
+    #     x2 - x3
+    # )
+    Ds = wp.mat33d(
+        x0.x - x3.x, x1.x - x3.x, x2.x - x3.x,
+        x0.y - x3.y, x1.y - x3.y, x2.y - x3.y,
+        x0.z - x3.z, x1.z - x3.z, x2.z - x3.z
     )
     F = Ds * inv_D
     volume = volumes[ele_idx]
@@ -110,15 +115,57 @@ def elastic_gradient_hessian (
         + lmbda * (J - alpha) * J * FinvT
     )
 
-    for i in range(3):
-        gradient[i] = volume * wp.trace(wp.transpose(dPhi_dF) * dF_dx[i])
-        for j in range(3):
-            hessian[i, j] = volume * (
-                wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0))) * wp.trace(Ft * dF_dx[i]) * wp.trace(Ft * dF_dx[j])
-                + mu * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) * wp.trace(wp.transpose(dF_dx[i]) * dF_dx[j])
-                + lmbda * J * (wp.float64(2.0) * J - alpha) * wp.trace(Finv * dF_dx[i]) * wp.trace(Finv * dF_dx[j])
-                - lmbda * J * (J - alpha) * wp.trace(Finv * dF_dx[j] * Finv * dF_dx[i])
-            )
+    gradient[0] = volume * wp.trace(wp.transpose(dPhi_dF) * dF_dx[0])
+    gradient[1] = volume * wp.trace(wp.transpose(dPhi_dF) * dF_dx[1])
+    gradient[2] = volume * wp.trace(wp.transpose(dPhi_dF) * dF_dx[2])
+
+    trFdF0 = wp.trace(Ft * dF_dx[0])
+    trFdF1 = wp.trace(Ft * dF_dx[1])
+    trFdF2 = wp.trace(Ft * dF_dx[2])
+
+    trFinvdF0 = wp.trace(Finv * dF_dx[0])
+    trFinvdF1 = wp.trace(Finv * dF_dx[1])
+    trFinvdF2 = wp.trace(Finv * dF_dx[2])
+
+    trdF0dF0 = wp.trace(wp.transpose(dF_dx[0]) * dF_dx[0])
+    trdF0dF1 = wp.trace(wp.transpose(dF_dx[0]) * dF_dx[1])
+    trdF0dF2 = wp.trace(wp.transpose(dF_dx[0]) * dF_dx[2])
+    trdF1dF1 = wp.trace(wp.transpose(dF_dx[1]) * dF_dx[1])
+    trdF1dF2 = wp.trace(wp.transpose(dF_dx[1]) * dF_dx[2])
+    trdF2dF2 = wp.trace(wp.transpose(dF_dx[2]) * dF_dx[2])
+
+    trFinvdF0FinvdF0 = wp.trace(Finv * dF_dx[0] * Finv * dF_dx[0])
+    trFinvdF0FinvdF1 = wp.trace(Finv * dF_dx[0] * Finv * dF_dx[1])
+    trFinvdF0FinvdF2 = wp.trace(Finv * dF_dx[0] * Finv * dF_dx[2])
+    trFinvdF1FinvdF1 = wp.trace(Finv * dF_dx[1] * Finv * dF_dx[1])
+    trFinvdF1FinvdF2 = wp.trace(Finv * dF_dx[1] * Finv * dF_dx[2])
+    trFinvdF2FinvdF2 = wp.trace(Finv * dF_dx[2] * Finv * dF_dx[2])
+
+    c1 = wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0)))
+    c2 = mu * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0)))
+    c3 = lmbda * J * (wp.float64(2.0) * J - alpha)
+    c4 = -lmbda * J * (J - alpha)
+
+    hessian[0,0] = volume * (c1 * trFdF0 * trFdF0 + c2 * trdF0dF0 + c3 * trFinvdF0 * trFinvdF0 + c4 * trFinvdF0FinvdF0)
+    hessian[0,1] = volume * (c1 * trFdF0 * trFdF1 + c2 * trdF0dF1 + c3 * trFinvdF0 * trFinvdF1 + c4 * trFinvdF0FinvdF1)
+    hessian[0,2] = volume * (c1 * trFdF0 * trFdF2 + c2 * trdF0dF2 + c3 * trFinvdF0 * trFinvdF2 + c4 * trFinvdF0FinvdF2)
+    hessian[1,0] = hessian[0,1]
+    hessian[1,1] = volume * (c1 * trFdF1 * trFdF1 + c2 * trdF1dF1 + c3 * trFinvdF1 * trFinvdF1 + c4 * trFinvdF1FinvdF1)
+    hessian[1,2] = volume * (c1 * trFdF1 * trFdF2 + c2 * trdF1dF2 + c3 * trFinvdF1 * trFinvdF2 + c4 * trFinvdF1FinvdF2)
+    hessian[2,0] = hessian[0,2]
+    hessian[2,1] = hessian[1,2]
+    hessian[2,2] = volume * (c1 * trFdF2 * trFdF2 + c2 * trdF2dF2 + c3 * trFinvdF2 * trFinvdF2 + c4 * trFinvdF2FinvdF2)
+
+
+    # for i in range(3):
+    #     # gradient[i] = volume * wp.trace(wp.transpose(dPhi_dF) * dF_dx[i])
+    #     for j in range(3):
+    #         hessian[i, j] = volume * (
+    #             wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0))) * wp.trace(Ft * dF_dx[i]) * wp.trace(Ft * dF_dx[j])
+    #             + mu * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) * wp.trace(wp.transpose(dF_dx[i]) * dF_dx[j])
+    #             + lmbda * J * (wp.float64(2.0) * J - alpha) * wp.trace(Finv * dF_dx[i]) * wp.trace(Finv * dF_dx[j])
+    #             - lmbda * J * (J - alpha) * wp.trace(Finv * dF_dx[j] * Finv * dF_dx[i])
+    #         )
 
 
     ### St. Venant-Kirchhoff
@@ -500,7 +547,6 @@ class VBDSolver:
                     outputs=[new_positions, grads, dxs],
                     device=self.device
                 )
-             
             hist["dx"].append(abs(dxs.numpy()).mean())
             hist["grad"].append(abs(grads.numpy()).mean())
             if abs(dxs.numpy().sum(1)).max() < dx_tol:
