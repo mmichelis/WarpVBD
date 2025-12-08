@@ -13,7 +13,7 @@ import vbd_solver
 # import vbd_solver_np as vbd_solver
 
 
-def render (vertices, elements, filename=None, spp=4):
+def render (vertices, elements, color_groups=None, filename=None, spp=4):
     """
     Short rendering script for tetrahedral meshes using PBRT.
     """
@@ -26,13 +26,22 @@ def render (vertices, elements, filename=None, spp=4):
         'camera_lookat': (0.1, 0.25, 0.25),     # Position that camera looks at
     }
     transforms=[
-        ('s', 1),
+        ('s', 2),
         ('t', [0, 0, 0.3])
     ]
     renderer = PbrtRenderer(options)
 
     renderer.add_tri_mesh(vertices=vertices, elements=elements, render_edges=True, color="496d8a", transforms=transforms)
     renderer.add_tri_mesh(objFile='asset/mesh/curved_ground.obj', texture_img='chkbd_24_0.7', transforms=[('s', 4)])
+
+    if color_groups is not None:
+        # Color each vertex as a sphere according to its color group
+        n_colors = len(color_groups)
+        cmap = plt.get_cmap('tab20', n_colors)
+        for c, cg in enumerate(color_groups.values()):
+            for idx in cg:
+                renderer.add_shape_mesh({'name': 'sphere', 'center': vertices[idx], 'radius': 0.005}, color=cmap(c)[:3], transforms=transforms)
+
     renderer.render()
 
 
@@ -108,8 +117,8 @@ def main (args):
         adj_v2e=adj_v2e,
         color_groups=colors,
         densities=densities,
-        youngs_modulus=50e3,
-        poisson_ratio=0.45,
+        youngs_modulus=250e3,
+        poisson_ratio=0.49,
         damping_coefficient=0.0,
         active_mask=active_mask,
         gravity=wp.vec3d(0.0, 0.0, -9.81),

@@ -96,54 +96,53 @@ def elastic_gradient_hessian (
     gradient = wp.vec3d()
     hessian = wp.mat33d()
 
-    # Elastic, stable Neo-hookean
-    mu = wp.float64(4.0) * lame_mu / wp.float64(3.0)                    # Adjusted mu for stable Neo-Hookean
-    lmbda = lame_lambda + wp.float64(5.0) * lame_mu / wp.float64(6.0)   # Adjusted lambda for stable Neo-Hookean
-    alpha = wp.float64(1.0) + wp.float64(0.75) * mu / lmbda
-
     J = wp.determinant(F)
     Ic = wp.trace(F * wp.transpose(F))
     Ft = wp.transpose(F)
     Finv = wp.inverse(F)
     FinvT = wp.transpose(Finv)
-    dPhi_dF = (
-        mu * F * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) 
-        + lmbda * (J - alpha) * J * FinvT
-    )
 
-    # Sum up all contributions
-    for i in range(3):
-        for j in range(3):
-            gradient[0] += volume * dPhi_dF[i, j] * dF_dx[0][i, j]
-            gradient[1] += volume * dPhi_dF[i, j] * dF_dx[1][i, j]
-            gradient[2] += volume * dPhi_dF[i, j] * dF_dx[2][i, j]
+    ### Elastic, stable Neo-hookean
+    # mu = wp.float64(4.0) * lame_mu / wp.float64(3.0)                    # Adjusted mu for stable Neo-Hookean
+    # lmbda = lame_lambda + wp.float64(5.0) * lame_mu / wp.float64(6.0)   # Adjusted lambda for stable Neo-Hookean
+    # alpha = wp.float64(1.0) + wp.float64(0.75) * mu / lmbda
+    # dPhi_dF = (
+    #     mu * F * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) 
+    #     + lmbda * (J - alpha) * J * FinvT
+    # )
 
-            hessian[i, j] += volume * (
-                wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0))) * wp.trace(Ft * dF_dx[i]) * wp.trace(Ft * dF_dx[j])
-                + mu * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) * wp.trace(wp.transpose(dF_dx[i]) * dF_dx[j])
-                + lmbda * J * (wp.float64(2.0) * J - alpha) * wp.trace(Finv * dF_dx[i]) * wp.trace(Finv * dF_dx[j])
-                - lmbda * J * (J - alpha) * wp.trace(Finv * dF_dx[j] * Finv * dF_dx[i])
-            )
+    # for i in range(3):
+    #     for j in range(3):
+    #         gradient[0] += volume * dPhi_dF[i, j] * dF_dx[0][i, j]
+    #         gradient[1] += volume * dPhi_dF[i, j] * dF_dx[1][i, j]
+    #         gradient[2] += volume * dPhi_dF[i, j] * dF_dx[2][i, j]
+
+    #         hessian[i, j] += volume * (
+    #             wp.float64(2.0) * mu / ((Ic + wp.float64(1.0))*(Ic + wp.float64(1.0))) * wp.trace(Ft * dF_dx[i]) * wp.trace(Ft * dF_dx[j])
+    #             + mu * (wp.float64(1.0) - wp.float64(1.0) / (Ic + wp.float64(1.0))) * wp.trace(wp.transpose(dF_dx[i]) * dF_dx[j])
+    #             + lmbda * J * (wp.float64(2.0) * J - alpha) * wp.trace(Finv * dF_dx[i]) * wp.trace(Finv * dF_dx[j])
+    #             - lmbda * J * (J - alpha) * wp.trace(Finv * dF_dx[j] * Finv * dF_dx[i])
+    #         )
 
 
     ### St. Venant-Kirchhoff
-    # E = wp.float64(0.5) * (Ft * F - wp.identity(3, dtype=wp.float64))
-    # for i in range(3):
-    #     dEdxi = wp.float64(0.5) * (Ft * dF_dx[i] + wp.transpose(dF_dx[i]) * F)
+    E = wp.float64(0.5) * (Ft * F - wp.identity(3, dtype=wp.float64))
+    for i in range(3):
+        dEdxi = wp.float64(0.5) * (Ft * dF_dx[i] + wp.transpose(dF_dx[i]) * F)
 
-    #     gradient[i] = volume * (
-    #         lame_lambda * wp.trace(E) * wp.trace(dEdxi)
-    #         + wp.float64(2.0) * lame_mu * wp.trace(wp.transpose(dEdxi) * E)
-    #     )
+        gradient[i] = volume * (
+            lame_lambda * wp.trace(E) * wp.trace(dEdxi)
+            + wp.float64(2.0) * lame_mu * wp.trace(wp.transpose(dEdxi) * E)
+        )
         
-    #     for j in range(3):
-    #         dEdxj = wp.float64(0.5) * (Ft * dF_dx[j] + wp.transpose(dF_dx[j]) * F)
-    #         d2E_dxidxj = wp.float64(0.5) * (wp.transpose(dF_dx[i]) * dF_dx[j] + wp.transpose(dF_dx[j]) * dF_dx[i])
+        for j in range(3):
+            dEdxj = wp.float64(0.5) * (Ft * dF_dx[j] + wp.transpose(dF_dx[j]) * F)
+            d2E_dxidxj = wp.float64(0.5) * (wp.transpose(dF_dx[i]) * dF_dx[j] + wp.transpose(dF_dx[j]) * dF_dx[i])
             
-    #         hessian[i, j] += volume * (
-    #             lame_lambda * (wp.trace(dEdxi) * wp.trace(dEdxj) + wp.trace(E) * wp.trace(d2E_dxidxj))
-    #             + wp.float64(2.0) * lame_mu * (wp.trace(wp.transpose(dEdxi) * dEdxj) + wp.trace(wp.transpose(d2E_dxidxj) * E))
-    #         )
+            hessian[i, j] += volume * (
+                lame_lambda * (wp.trace(dEdxi) * wp.trace(dEdxj) + wp.trace(E) * wp.trace(d2E_dxidxj))
+                + wp.float64(2.0) * lame_mu * (wp.trace(wp.transpose(dEdxi) * dEdxj) + wp.trace(wp.transpose(d2E_dxidxj) * E))
+            )
 
     return gradient, hessian
 
@@ -172,6 +171,7 @@ def solve_grad_hess (
     active_mask: wp.array(dtype=wp.bool),
 
     new_positions: wp.array(dtype=wp.vec3d),
+    grads: wp.array(dtype=wp.vec3d),
     dxs: wp.array(dtype=wp.vec3d)
 ) -> None:
     """
@@ -201,6 +201,7 @@ def solve_grad_hess (
     
     Outputs:
         new_positions: Updated vertex positions.
+        grads: Accumulated gradients (for debugging).
         dxs: Position updates that were applied.
     """
     i = wp.tid()
@@ -233,6 +234,7 @@ def solve_grad_hess (
         hess += hess_inertia + hess_elastic + hess_damping
 
     # Local linear system solve per vertex
+    grads[idx_v] = grad
     dxs[idx_v] = wp.inverse(hess) * (-grad)
     new_positions[idx_v] = positions[idx_v] + dxs[idx_v]
     # wp.printf("Vertex %d: grad = %e %e %e, dx = %e %e %e\n", idx_v, grad[0], grad[1], grad[2], dxs[idx_v][0], dxs[idx_v][1], dxs[idx_v][2])
@@ -253,16 +255,16 @@ def position_initialization (
     if not active_mask[i]:
         return
 
-    for j in range(3):
-        new_positions[i][j] = positions[i][j] + velocities[i][j] * dt + gravity[j] * dt * dt
+    new_positions[i] = positions[i] + velocities[i] * dt + gravity * dt * dt
 
 
 @wp.kernel
-def compute_element_masses_volume (
+def compute_element_invDm_masses_volume (
     positions: wp.array(dtype=wp.vec3d),
     elements: wp.array(dtype=wp.vec4i),
     densities: wp.array(dtype=wp.float64),
 
+    inv_Dm: wp.array(dtype=wp.mat33d),
     masses: wp.array(dtype=wp.float64),
     volumes: wp.array(dtype=wp.float64)
 ) -> None:
@@ -293,45 +295,10 @@ def compute_element_masses_volume (
         x1 - x3,
         x2 - x3
     )
-    volume = wp.abs(wp.determinant(Dm)) / wp.float64(6.0)
-    masses[i] = density * volume
-    volumes[i] = volume
-
-    # Distribute mass equally to the four vertices, TODO: INEFFICIENT, CHANGE TO TILES
-    # for k in range(4):
-    #     wp.atomic_add(masses, ele[k], mass / wp.float64(4.0))
-
-
-@wp.kernel
-def compute_inv_Dm (
-    positions: wp.array(dtype=wp.vec3d),
-    elements: wp.array(dtype=wp.vec4i),
-
-    inv_Dm: wp.array(dtype=wp.mat33d)
-) -> None:
-    """
-    Compute the inverted undeformed/reference shape matrix for each tetrahedral element.
-
-    Args:
-        positions: Vertex positions.
-        elements: Mesh elements.
-        inv_Dm: Output array for inverted shape matrices.
-    """
-    i = wp.tid()
-
-    ele = elements[i]
-    X0 = positions[ele[0]]
-    X1 = positions[ele[1]]
-    X2 = positions[ele[2]]
-    X3 = positions[ele[3]]
-
-    # Each column is an edge vector
-    Dm = wp.matrix_from_cols(
-        X0 - X3,
-        X1 - X3,
-        X2 - X3
-    )
     inv_Dm[i] = wp.inverse(Dm)
+    volumes[i] = wp.abs(wp.determinant(Dm)) / wp.float64(6.0)
+    masses[i] = density * volumes[i]
+
     # Check if inversion was successful
     res = Dm * inv_Dm[i]
     for r in range(3):
@@ -340,6 +307,7 @@ def compute_inv_Dm (
                 assert wp.abs(res[r,c] - wp.float64(1.0)) < EPS, "Singular matrix encountered in inv_Dm computation!"
             else:
                 assert wp.abs(res[r,c]) < EPS, "Singular matrix encountered in inv_Dm computation!"
+
 
 
 class VBDSolver:
@@ -403,27 +371,18 @@ class VBDSolver:
             lame_lambda = (youngs_modulus * poisson_ratio) / ((1.0 + poisson_ratio) * (1.0 - 2.0 * poisson_ratio))
         self.lame_mu = lame_mu
         self.lame_lambda = lame_lambda
+        print(f"Using Lame parameters: mu = {self.lame_mu:.1f}, lambda = {self.lame_lambda:.1f}")
 
-
-        ### Compute mass per element from element densities
+        ### Compute inverted undeformed/reference shape matrix, mass, volume per element
         n_elements = elements.shape[0]
+        self.inv_Dm = wp.zeros(n_elements, dtype=wp.mat33d, device=device)
         self.masses = wp.zeros(n_elements, dtype=wp.float64, device=device)
         self.volumes = wp.zeros(n_elements, dtype=wp.float64, device=device)
         wp.launch(
-            compute_element_masses_volume,
+            compute_element_invDm_masses_volume,
             dim=n_elements,
             inputs=[initial_positions, elements, densities],
-            outputs=[self.masses, self.volumes],
-            device=device
-        )
-
-        ### Compute inverted undeformed/reference shape matrix for tetrahedrons.
-        self.inv_Dm = wp.zeros(n_elements, dtype=wp.mat33d, device=device)
-        wp.launch(
-            compute_inv_Dm,
-            dim=n_elements,
-            inputs=[initial_positions, elements],
-            outputs=[self.inv_Dm],
+            outputs=[self.inv_Dm, self.masses, self.volumes],
             device=device
         )
 
@@ -468,6 +427,7 @@ class VBDSolver:
         n_vertices_per_color = self.color_groups.shape[1]
 
         # Initial guess: explicit Euler
+        self.old_positions = positions
         new_positions = wp.clone(positions)
         wp.launch(
             position_initialization,
@@ -480,8 +440,10 @@ class VBDSolver:
         MAX_ITER = 100
         for i in range(MAX_ITER):
             dxs = wp.zeros_like(new_positions)
+            grads = wp.zeros_like(new_positions)
             # Loop over colors
             for c in range(n_colors):
+                nonzeros_in_grad_before = np.sum((abs(grads.numpy()) > 1e-16).any(axis=1))
                 wp.synchronize_device(self.device)
                 wp.launch(
                     solve_grad_hess,
@@ -493,18 +455,21 @@ class VBDSolver:
                         self.gravity, dt, 
                         self.elements, self.adj_v2e, self.color_groups[c], self.active_mask
                     ],
-                    outputs=[new_positions, dxs],
+                    outputs=[new_positions, grads, dxs],
                     device=self.device
                 )
+                n_verts_in_color = np.sum(self.color_groups[c].numpy() != -1)
+                nonzeros_in_grad_after = np.sum((abs(grads.numpy()) > 1e-16).any(axis=1))
+                print(f"Color {c+1}/{n_colors}, vertices: {n_verts_in_color}, nonzeros in grad before: {nonzeros_in_grad_before}, after: {nonzeros_in_grad_after}")
+            breakpoint()
              
             hist["dx"].append(abs(dxs.numpy()).mean())
-            if abs(dxs.numpy().sum(1)).max() < 1e-6:
+            hist["grad"].append(abs(grads.numpy()).mean())
+            if abs(dxs.numpy().sum(1)).max() < 1e-12:
                 break
         
-        # breakpoint()
         if i == MAX_ITER - 1:
             print(f"Warning: VBD solver did not converge within the maximum number of iterations. Final dx max: {abs(dxs.numpy()).max()}")
-
         # print(f"Iteration {i}: Maximum dx: {abs(dxs.numpy()).max():.2e}")
 
         plot = False
@@ -519,26 +484,19 @@ class VBDSolver:
             axs[0].set_xlim(0, len(hist["dx"]))
             axs[0].set_yscale("log")
 
-            # axs[1].plot(np.array(hist["grad"]))
-            # axs[1].set_xlabel("Iteration (-)")
-            # axs[1].set_ylabel("Mean grad norm (N)")
-            # axs[1].grid()
-            # axs[1].set_xlim(0, len(hist["grad"]))
-            # axs[1].set_yscale("log")
+            axs[1].plot(np.array(hist["grad"]))
+            axs[1].set_xlabel("Iteration (-)")
+            axs[1].set_ylabel("Mean grad norm (N)")
+            axs[1].grid()
+            axs[1].set_xlim(0, len(hist["grad"]))
+            axs[1].set_yscale("log")
 
             fig.savefig("outputs/vbd_convergence.png", dpi=300, bbox_inches='tight')
             plt.close(fig)
 
-        # breakpoint()
-
 
         # Discretize velocities, implicit Euler
-        self.old_velocities = (new_positions - positions) / dt
-        # Set old positions for next velocities computation
-        self.old_positions = new_positions
-
-        # Check if nan because hessian singlar TODO
-        # print(f"All not nan: {wp.isnan(new_positions)}")
+        self.old_velocities = (new_positions - self.old_positions) / dt
 
         return new_positions
 
