@@ -98,7 +98,7 @@ def main (args):
     sim = CantileverSim(
         nx=(args.nx, args.ny, args.nz), 
         dx=(args.dx, args.dy, args.dz), 
-        density=1070, youngs_modulus=250e3, poissons_ratio=0.49,
+        density=1070, youngs_modulus=250e3, poissons_ratio=0.45,
         dx_tol=1e-9, device="cuda"
     )
 
