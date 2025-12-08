@@ -150,11 +150,11 @@ def main (args):
         ax.grid()
         ax.set_xlim(0, n_seconds)
         ax.ticklabel_format(axis='both', style='sci', scilimits=(0,0))
-        fig.savefig("outputs/tip_displacement.png", dpi=300, bbox_inches='tight')
+        fig.savefig("outputs/displacement_cantilever.png", dpi=300, bbox_inches='tight')
         plt.close(fig)
 
     # Store as csv
-    np.savetxt("outputs/tip_positions.csv", tip_positions_np, delimiter=",")
+    np.savetxt("outputs/displacement_cantilever.csv", tip_positions_np, delimiter=",")
 
     if args.render:
         # Render mp4

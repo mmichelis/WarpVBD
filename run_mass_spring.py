@@ -16,7 +16,7 @@ class MassSpringSim:
     """
     Mass Spring System Simulation, where the mass is standardized as a 1m x 1m x 1m cube of 1kg. 
     """
-    def __init__ (self, nx=11, density=1, youngs_modulus=10e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=100, device="cuda"):
+    def __init__ (self, nx=11, density=1, youngs_modulus=5e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=1000, device="cuda"):
         ### Set up tetrahedral mesh
         dx = 1.0/nx
         voxels = np.ones((nx, nx, 2*nx), dtype=bool)
@@ -63,11 +63,11 @@ class MassSpringSim:
             device=device
         )
 
-        ### Add a wall plane as a hex mesh box. Center should align with cantilever base center.
-        beam_com = vertices.mean(axis=0)
-        wall_width, wall_height, wall_depth = 0.02, 0.1, 0.1
-        wall_translation = np.array([-wall_width, beam_com[1]-wall_height/2, beam_com[2]-wall_depth/2])
-        self.wall_vertices, self.wall_elements = voxel2hex(np.ones((2,1,1), dtype=bool), wall_width/2, wall_height, wall_depth)
+        ### Add a wall plane as a hex mesh box. Center should align with mass spring top center.
+        com = vertices.mean(axis=0)
+        wall_width, wall_depth, wall_height = 1.0, 1.0, 0.1
+        wall_translation = np.array([com[0]-wall_width/2, com[1]-wall_depth/2, 2*nx*dx-wall_height/2])
+        self.wall_vertices, self.wall_elements = voxel2hex(np.ones((1,1,1), dtype=bool), wall_width, wall_depth, wall_height)
         self.wall_vertices += wall_translation
 
 
@@ -120,7 +120,7 @@ class MassSpringSim:
 
 def main (args):
     # Set up simulation
-    sim = MassSpringSim(nx=args.nx, dx_tol=1e-6, max_iter=1000, device="cuda")
+    sim = MassSpringSim(nx=args.nx, dx_tol=1e-5, device="cuda")
 
     ### Begin the solve
     n_seconds = 2.0
@@ -141,7 +141,7 @@ def main (args):
         print(f"---Timestep [{t:04d}/{n_timesteps}] ({1e3*dt*n_substeps:.1f}ms) in {1e3*(end_time - start_time):.3f}ms: Mean Positions: {solution.numpy().mean(axis=0)}")
 
         if args.render:
-            sim.render(solution.numpy(), filename=f"outputs/sim/msd_{t:03d}.png", spp=4)
+            sim.render(solution.numpy(), filename=f"outputs/sim/mass_spring_{t:03d}.png", spp=4)
 
         # Plot Tip Displacements
         fig, ax = plt.subplots(figsize=(3,2))
@@ -152,15 +152,15 @@ def main (args):
         ax.grid()
         ax.set_xlim(0, n_seconds)
         ax.ticklabel_format(axis='both', style='sci', scilimits=(0,0))
-        fig.savefig("outputs/tip_msd.png", dpi=300, bbox_inches='tight')
+        fig.savefig("outputs/displacement_mass_spring.png", dpi=300, bbox_inches='tight')
         plt.close(fig)
 
     # Store as csv
-    np.savetxt("outputs/tip_msd.csv", tip_positions_np, delimiter=",")
+    np.savetxt("outputs/displacement_mass_spring.csv", tip_positions_np, delimiter=",")
 
     if args.render:
         # Render mp4
-        export_mp4("outputs/sim/", "outputs/msd.mp4", fps=int(0.25*fps), name_prefix="msd_")
+        export_mp4("outputs/sim/", "outputs/mass_spring.mp4", fps=fps, name_prefix="mass_spring_")
 
 
 if __name__ == "__main__":
