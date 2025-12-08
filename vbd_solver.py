@@ -321,6 +321,8 @@ class VBDSolver:
             active_mask: wp.array(dtype=wp.bool)=None,
             gravity: wp.vec3d = wp.vec3d(0.0, 0.0, -9.81),
 
+            dx_tol: float=1e-9,
+
             device: str = "cpu"
         ) -> None:
         """
@@ -338,14 +340,18 @@ class VBDSolver:
 
             gravity: Gravity vector.
             active_mask: Optional mask to indicate active vertices.
+            dx_tol: Convergence tolerance for position updates.
+            device: Device to run the simulation on ("cpu" or "cuda").
         """
         self.initial_positions = initial_positions
         self.old_positions = wp.clone(initial_positions) # For kinetic energy
         self.old_velocities = wp.zeros_like(initial_positions)
         self.elements = elements
+
         self.densities = densities
         self.damping_coefficient = damping_coefficient
         self.gravity = gravity
+        self.dx_tol = dx_tol
         self.device = device
 
         if active_mask is not None:
@@ -441,7 +447,8 @@ class VBDSolver:
     def step (
         self, 
         positions: wp.array(dtype=wp.vec3d),
-        dt: wp.float64
+        dt: wp.float64,
+        dx_tol: float = None
     ) -> wp.array(dtype=wp.vec3d):
         """
         Perform a single time step of the VBD solver using graph coloring for parallelization.
@@ -456,6 +463,9 @@ class VBDSolver:
         n_vertices = positions.shape[0]
         n_colors = self.color_groups.shape[0]
         n_vertices_per_color = self.color_groups.shape[1]
+
+        if dx_tol is None:
+            dx_tol = self.dx_tol
 
         # Initial guess: explicit Euler
         self.old_positions = positions
@@ -491,7 +501,7 @@ class VBDSolver:
              
             hist["dx"].append(abs(dxs.numpy()).mean())
             hist["grad"].append(abs(grads.numpy()).mean())
-            if abs(dxs.numpy().sum(1)).max() < 1e-6:
+            if abs(dxs.numpy().sum(1)).max() < dx_tol:
                 break
         
         if i == MAX_ITER - 1:
