@@ -19,6 +19,7 @@ class CantileverSim:
         elements = hex2tets(hex_elements)
         n_vertices = vertices.shape[0]
         n_elements = elements.shape[0]
+        self.initial_positions = vertices
         self.elements = elements
         print(f"Generated tetrahedral mesh with {n_vertices} vertices and {n_elements} elements.")
 
