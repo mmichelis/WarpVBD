@@ -5,8 +5,8 @@ import warp as wp
 import matplotlib.pyplot as plt
 
 from _utils import voxel2hex, hex2tets
-from coloring import graph_coloring, graph_coloring_wp
-from benchmark import benchmark_functions
+from _coloring import graph_coloring, graph_coloring_wp
+from _benchmark import benchmark_functions
 
 # Matplotlib global settings
 plt.rcParams.update({"font.size": 7})

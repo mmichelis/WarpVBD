@@ -4,7 +4,6 @@ import time
 import numpy as np
 
 
-
 def benchmark_functions (funcs: list, *args: tuple, num_samples: int=10, **kwargs: dict) -> dict:
     """
     Benchmark multiple functions by running them num_samples times and recording their execution times. For the sake of compiled warp kernels, we run each function once that is not timed.

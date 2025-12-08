@@ -7,7 +7,7 @@ import warp as wp
 import matplotlib.pyplot as plt
 
 from run_cantilever import CantileverSim
-from benchmark import benchmark_functions
+from _benchmark import benchmark_functions
 
 # Matplotlib global settings
 plt.rcParams.update({"font.size": 7})
@@ -24,7 +24,7 @@ if __name__ == "__main__":
 
     ### Benchmark VBD solver performance scaling with mesh size
     num_samples = 3
-    tolerances = [1e-3, 1e-5, 1e-7, 1e-9]
+    tolerances = [1e-7, 5e-8, 1e-8, 5e-9, 1e-9]
     metrics = {
         "tolerance": [],
         "times": {

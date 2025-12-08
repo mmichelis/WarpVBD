@@ -55,24 +55,38 @@ class CantileverSim:
             device=device
         )
 
+        ### Add a wall plane as a hex mesh box. Center should align with cantilever base center.
+        beam_com = vertices.mean(axis=0)
+        wall_width, wall_height, wall_depth = 0.02, 0.1, 0.1
+        wall_translation = np.array([-wall_width, beam_com[1]-wall_height/2, beam_com[2]-wall_depth/2])
+        self.wall_vertices, self.wall_elements = voxel2hex(np.ones((2,1,1), dtype=bool), wall_width/2, wall_height, wall_depth)
+        self.wall_vertices += wall_translation
+
+
     def step (self, dt):
         return self.solver.step(self.solver.old_positions, wp.float64(dt))
 
     def render (self, vertices, color_groups=False, filename=None, spp=4):
         """
-        Short rendering script for tetrahedral meshes using PBRT.
+        Rendering function using PBRT.
+
+        Args:
+            vertices (np.ndarray): Vertex positions to render.
+            color_groups (bool): Whether to color vertices by groups.
+            filename (str): Output filename for the rendered image.
+            spp (int): Samples per pixel, defines how much noise is in the image. Lower is faster.
         """
         options = {
             'file_name': filename,
             'light_map': 'uffizi-large.exr',
             'sample': spp,
             'max_depth': 2,
-            'camera_pos': (0.1, -0.75, 0.5),   # Position of camera
-            'camera_lookat': (0.1, 0.25, 0.25),     # Position that camera looks at
+            'camera_pos': (0.3, -0.75, 0.3),   # Position of camera
+            'camera_lookat': (0.0, 0.25, 0.1),     # Position that camera looks at
         }
         transforms=[
             ('s', 2),
-            ('t', [0, 0, 0.3])
+            ('t', [0, 0, 0.15])
         ]
         renderer = PbrtRenderer(options)
 
@@ -81,11 +95,14 @@ class CantileverSim:
 
         if color_groups:
             # Color each vertex as a sphere according to its color group
-            n_colors = len(self.color_groups)
+            n_colors = len(self.solver.color_groups)
             cmap = plt.get_cmap('tab20', n_colors)
-            for c, cg in enumerate(self.color_groups.values()):
+            for c, cg in enumerate(self.solver.color_groups.numpy().values()):
                 for idx in cg:
                     renderer.add_shape_mesh({'name': 'sphere', 'center': vertices[idx], 'radius': 0.005}, color=cmap(c)[:3], transforms=transforms)
+
+        ### Add a wall plane as a hex mesh box.
+        renderer.add_hex_mesh(vertices=self.wall_vertices, elements=self.wall_elements, color="2ca02c", transforms=transforms)
 
         renderer.render()
 
@@ -121,7 +138,7 @@ def main (args):
         print(f"---Timestep [{t:04d}/{n_timesteps}] ({1e3*dt*n_substeps:.1f}ms) in {1e3*(end_time - start_time):.3f}ms: Mean Positions: {solution.numpy().mean(axis=0)}")
 
         if args.visualize:
-            sim.render(solution.numpy(), filename=f"outputs/sim/cantilever_{t:03d}.png", spp=4)
+            sim.render(solution.numpy(), filename=f"outputs/sim/cantilever_{t:03d}.png", spp=32)
 
         # Plot Tip Displacements
         fig, ax = plt.subplots(figsize=(3,2))

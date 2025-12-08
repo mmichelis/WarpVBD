@@ -648,11 +648,11 @@ def hex2obj (vertices, elements, obj_file_name=None, obj_type='quad'):
 
     face_dict = {}
     face_idx = [
-        # (0, 1, 2, 3),
-        # (4, 5, 6, 7),
-        # (0, 4, 5, 1),
-        # (2, 3, 7, 6),
-        # (1, 5, 6, 2),
+        (0, 1, 2, 3),
+        (4, 5, 6, 7),
+        (0, 4, 5, 1),
+        (2, 3, 7, 6),
+        (1, 5, 6, 2),
         (0, 3, 7, 4)
     ]
     for i in range(element_num):

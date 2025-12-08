@@ -5,7 +5,7 @@ import warp as wp
 
 import matplotlib.pyplot as plt
 
-from benchmark import benchmark_functions
+from _benchmark import benchmark_functions
 
 # Matplotlib global settings
 plt.rcParams.update({"font.size": 7})

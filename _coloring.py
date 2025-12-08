@@ -3,22 +3,6 @@ import numpy as np
 import warp as wp
 
 
-
-# @wp.kernel
-# def kernel_resolve_conflicts (
-#     coloring: wp.array(dtype=wp.int32),
-#     vertices_inspect: wp.array(dtype=wp.int32),
-#     adjacency: wp.array(dtype=wp.int32),
-#     conflicts: wp.array(dtype=wp.int32)
-# ):
-#     i, j = wp.tid()
-#     vertex = vertices_inspect[i]
-#     if adjacency[vertex, j] > 0:
-#         if coloring[j] == coloring[vertex]:
-#             coloring[vertex] = 
-
-#             conflicts[i] = i
-
 def assign_color (coloring: np.ndarray, neighbors: set) -> int:
     """
     Helper function to assign the lowest available color not used by neighbors.
