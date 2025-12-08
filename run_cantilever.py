@@ -8,136 +8,117 @@ import time
 
 from _utils import voxel2hex, hex2tets
 from _renderer import PbrtRenderer, export_mp4
-from coloring import graph_coloring, compute_adjacency_dict
 import vbd_solver
-# import vbd_solver_np as vbd_solver
 
 
-def render (vertices, elements, color_groups=None, filename=None, spp=4):
-    """
-    Short rendering script for tetrahedral meshes using PBRT.
-    """
-    options = {
-        'file_name': filename,
-        'light_map': 'uffizi-large.exr',
-        'sample': spp,
-        'max_depth': 2,
-        'camera_pos': (0.1, -0.75, 0.5),   # Position of camera
-        'camera_lookat': (0.1, 0.25, 0.25),     # Position that camera looks at
-    }
-    transforms=[
-        ('s', 2),
-        ('t', [0, 0, 0.3])
-    ]
-    renderer = PbrtRenderer(options)
+class CantileverSim:
+    def __init__ (self, nx=(10, 3, 3), dx=(0.01, 0.01, 0.01), density=1070, youngs_modulus=250e3, poissons_ratio=0.45, device="cuda"):
+        ### Set up tetrahedral mesh
+        voxels = np.ones(nx, dtype=bool)
+        vertices, hex_elements = voxel2hex(voxels, *dx)
+        elements = hex2tets(hex_elements)
+        n_vertices = vertices.shape[0]
+        n_elements = elements.shape[0]
+        self.elements = elements
+        print(f"Generated tetrahedral mesh with {n_vertices} vertices and {n_elements} elements.")
 
-    renderer.add_tri_mesh(vertices=vertices, elements=elements, render_edges=True, color="496d8a", transforms=transforms)
-    renderer.add_tri_mesh(objFile='asset/mesh/curved_ground.obj', texture_img='chkbd_24_0.7', transforms=[('s', 4)])
+        # Set active mask
+        active_mask = np.ones((vertices.shape[0],), dtype=bool)
+        tip_idx = []
+        for i in range(vertices.shape[0]):
+            if vertices[i,0] < 1e-3:
+                active_mask[i] = False
+            elif vertices[i,0] > (nx[0] * dx[0] - 1e-3):
+                tip_idx.append(i)
+        self.tip_idx = tip_idx
+        print(f"Active vertices: {np.sum(active_mask)}/{vertices.shape[0]}")
 
-    if color_groups is not None:
-        # Color each vertex as a sphere according to its color group
-        n_colors = len(color_groups)
-        cmap = plt.get_cmap('tab20', n_colors)
-        for c, cg in enumerate(color_groups.values()):
-            for idx in cg:
-                renderer.add_shape_mesh({'name': 'sphere', 'center': vertices[idx], 'radius': 0.005}, color=cmap(c)[:3], transforms=transforms)
+        ### Initialize solver
+        wp.init()
+        solution = wp.array(vertices, dtype=wp.vec3d, device=device)
+        elements = wp.array(elements, dtype=wp.vec4i, device=device)
+        active_mask = wp.array(active_mask, dtype=wp.bool, device=device)
+        densities = wp.array(density * np.ones(n_elements), dtype=wp.float64, device=device)  # Uniform density
 
-    renderer.render()
+        self.solver = vbd_solver.VBDSolver(
+            initial_positions=solution,
+            elements=elements,
+            densities=densities,
+            youngs_modulus=youngs_modulus,
+            poissons_ratio=poissons_ratio,
+            damping_coefficient=0.0,
+            active_mask=active_mask,
+            gravity=wp.vec3d(0.0, 0.0, -9.81),
+            device=device
+        )
+
+    def step (self, dt):
+        return self.solver.step(self.solver.old_positions, wp.float64(dt))
+
+    def render (self, vertices, color_groups=False, filename=None, spp=4):
+        """
+        Short rendering script for tetrahedral meshes using PBRT.
+        """
+        options = {
+            'file_name': filename,
+            'light_map': 'uffizi-large.exr',
+            'sample': spp,
+            'max_depth': 2,
+            'camera_pos': (0.1, -0.75, 0.5),   # Position of camera
+            'camera_lookat': (0.1, 0.25, 0.25),     # Position that camera looks at
+        }
+        transforms=[
+            ('s', 2),
+            ('t', [0, 0, 0.3])
+        ]
+        renderer = PbrtRenderer(options)
+
+        renderer.add_tri_mesh(vertices=vertices, elements=self.elements, render_edges=True, color="496d8a", transforms=transforms)
+        renderer.add_tri_mesh(objFile='asset/mesh/curved_ground.obj', texture_img='chkbd_24_0.7', transforms=[('s', 4)])
+
+        if color_groups:
+            # Color each vertex as a sphere according to its color group
+            n_colors = len(self.color_groups)
+            cmap = plt.get_cmap('tab20', n_colors)
+            for c, cg in enumerate(self.color_groups.values()):
+                for idx in cg:
+                    renderer.add_shape_mesh({'name': 'sphere', 'center': vertices[idx], 'radius': 0.005}, color=cmap(c)[:3], transforms=transforms)
+
+        renderer.render()
+
+    def reset (self):
+        self.solver.reset()
 
 
 def main (args):
     ### Set up tetrahedral mesh
-    voxels = np.ones((args.nx, args.ny, args.nz), dtype=bool)
-    vertices, hex_elements = voxel2hex(voxels, args.dx, args.dy, args.dz)
-    elements = hex2tets(hex_elements)
-    points = [wp.vec3(point) for point in vertices]
-    tet_indices = elements.flatten().tolist()
-    num_vertices = vertices.shape[0]
-    num_elements = elements.shape[0]
-    print(f"Generated tetrahedral mesh with {len(points)} vertices and {len(elements)} elements.")
-
-    # Set active mask
-    active_mask = np.ones((vertices.shape[0],), dtype=bool)
-    tip_idx = []
-    for i in range(vertices.shape[0]):
-        if vertices[i,0] < 1e-3:
-            active_mask[i] = False
-        elif vertices[i,0] > (args.nx * args.dx - 1e-3):
-            tip_idx.append(i)
-    print(f"Active vertices: {np.sum(active_mask)}/{vertices.shape[0]}")
-
-    ### Perform graph coloring
-    start_time = time.time()
-    adjacency, vertex_valence = compute_adjacency_dict(elements)
-    vertex_coloring, color_groups = graph_coloring(adjacency)
-    end_time = time.time()
-    print(f"Assigned {len(color_groups)} colors in {(end_time - start_time)*1000:.4f}ms.")
-    print(f"Vertex valence: {vertex_valence}")
-    # Convert color groups to full array
-    n_colors = len(color_groups)
-    max_group_size = max(len(g) for g in color_groups.values())
-    colors = np.full([n_colors, max_group_size], -1, dtype=int)
-    for c in range(n_colors):
-        group = color_groups[c]
-        colors[c, :len(group)] = group
-
-    # Find an adjacency mapping from vertex -> neighboring elements
-    adj_v2e_list = [[] for _ in range(num_vertices)]
-    max_incident_elements = 0
-    for i, ele in enumerate(elements):
-        for vertex in ele:
-            adj_v2e_list[vertex].append(i)
-            max_incident_elements = max(max_incident_elements, len(adj_v2e_list[vertex]))
-    print(f"Max incident elements per vertex: {max_incident_elements}")
-    # Create fixed-size adjacency array
-    adj_v2e = np.full((num_vertices, max_incident_elements), -1, dtype=int)
-    for vertex in range(num_vertices):
-        for j, ele_idx in enumerate(adj_v2e_list[vertex]):
-            adj_v2e[vertex, j] = ele_idx
-
+    sim = CantileverSim(
+        nx=(args.nx, args.ny, args.nz), 
+        dx=(args.dx, args.dy, args.dz), 
+        density=1070, youngs_modulus=250e3, poissons_ratio=0.45, 
+        device="cuda"
+    )
 
     ### Begin the solve
-    device = "cuda"
-    wp.init()
-    solution = wp.array(vertices, dtype=wp.vec3d, device=device)
-    elements = wp.array(elements, dtype=wp.vec4i, device=device)
-    adj_v2e = wp.array(adj_v2e, dtype=wp.int32, device=device)
-    colors = wp.array(colors, dtype=wp.int32, device=device)
-    active_mask = wp.array(active_mask, dtype=wp.bool, device=device)
-    densities = wp.array(1070 * np.ones(num_elements), dtype=wp.float64, device=device)  # Uniform density
     n_seconds = 1.5
     fps = 100
     n_timesteps = int(n_seconds * fps)
     n_substeps = 10
     dt = 1/fps/n_substeps
-    print(f"Simulating {n_seconds}s of dynamics in {n_timesteps} timesteps of {n_substeps} substeps each (dt={dt:.6f}s).")
 
-    solver = vbd_solver.VBDSolver(
-        initial_positions=solution,
-        elements=elements,
-        adj_v2e=adj_v2e,
-        color_groups=colors,
-        densities=densities,
-        youngs_modulus=250e3,
-        poisson_ratio=0.45,
-        damping_coefficient=0.0,
-        active_mask=active_mask,
-        gravity=wp.vec3d(0.0, 0.0, -9.81),
-        device=device
-    )
     tip_positions = []
     for t in range(n_timesteps):
         start_time = time.time()
 
-        for i in range(n_substeps):
-            solution = solver.step(solution, wp.float64(dt))
-            tip_positions.append(solution.numpy()[tip_idx].mean(axis=0))
+        for _ in range(n_substeps):
+            solution = sim.step(dt)
+            tip_positions.append(solution.numpy()[sim.tip_idx].mean(axis=0))
 
         end_time = time.time()
         print(f"---Timestep [{t:04d}/{n_timesteps}] ({1e3*dt*n_substeps:.1f}ms) in {1e3*(end_time - start_time):.3f}ms: Mean Positions: {solution.numpy().mean(axis=0)}")
 
         if args.visualize:
-            render(solution.numpy(), elements.numpy(), filename=f"outputs/sim/cantilever_{t:03d}.png", spp=4)
+            sim.render(solution.numpy(), filename=f"outputs/sim/cantilever_{t:03d}.png", spp=4)
 
         # Plot Tip Displacements
         fig, ax = plt.subplots(figsize=(3,2))

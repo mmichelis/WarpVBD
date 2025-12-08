@@ -1,9 +1,12 @@
 ### VBD solver implementation
 
+import time
 import matplotlib.pyplot as plt
 
 import numpy as np
 import warp as wp
+
+from coloring import graph_coloring, compute_adjacency_dict
 
 EPS = 1e-12
 
@@ -307,14 +310,12 @@ class VBDSolver:
             self, 
             initial_positions: wp.array(dtype=wp.vec3d),
             elements: wp.array(dtype=wp.vec4i),
-            adj_v2e: wp.array(dtype=wp.int32),
-            color_groups: wp.array(dtype=wp.int32),
 
             densities: wp.array(dtype=wp.float64),
             lame_mu: wp.float64 = wp.float64(0.0),
             lame_lambda: wp.float64 = wp.float64(0.0),
             youngs_modulus: wp.float64 = wp.float64(0.0),
-            poisson_ratio: wp.float64 = wp.float64(0.5),
+            poissons_ratio: wp.float64 = wp.float64(0.5),
             damping_coefficient: wp.float64 = wp.float64(1.0),
 
             active_mask: wp.array(dtype=wp.bool)=None,
@@ -323,18 +324,17 @@ class VBDSolver:
             device: str = "cpu"
         ) -> None:
         """
-        Initialize the VBD solver with the tetrahedral mesh and simulation parameters.
+        Initialize the VBD solver with the tetrahedral mesh and simulation parameters. Creates graph coloring and adjacency structures.
+
         Args:
             initial_positions: Initial vertex positions.
             elements: Mesh elements.
-            adj_v2e: Adjacency mapping from vertex to neighboring elements.
-            color_groups: Color assignments for vertices.
 
             densities: Element densities.
             lame_mu: Lame parameter mu.
             lame_lambda: Lame parameter lambda.
             youngs_modulus: Young's modulus (not used if Lame parameters are provided).
-            poisson_ratio: Poisson's ratio (not used if Lame parameters are provided).
+            poissons_ratio: Poisson's ratio (not used if Lame parameters are provided).
 
             gravity: Gravity vector.
             active_mask: Optional mask to indicate active vertices.
@@ -343,8 +343,6 @@ class VBDSolver:
         self.old_positions = wp.clone(initial_positions) # For kinetic energy
         self.old_velocities = wp.zeros_like(initial_positions)
         self.elements = elements
-        self.adj_v2e = adj_v2e
-        self.color_groups = color_groups
         self.densities = densities
         self.damping_coefficient = damping_coefficient
         self.gravity = gravity
@@ -356,16 +354,17 @@ class VBDSolver:
             self.active_mask = wp.ones(initial_positions.shape[0], dtype=wp.bool)
     
         # If Lame parameters are not provided, compute them from Young's modulus and Poisson's ratio
-        if (wp.abs(lame_mu) == 0.0 and wp.abs(lame_lambda) == 0.0) and (wp.abs(youngs_modulus) == 0.0 or wp.abs(poisson_ratio) >= 0.5):
+        if (wp.abs(lame_mu) == 0.0 and wp.abs(lame_lambda) == 0.0) and (wp.abs(youngs_modulus) == 0.0 or wp.abs(poissons_ratio) >= 0.5):
             assert False, "Provide either Lame parameters or valid Young's modulus and Poisson's ratio!"
         elif wp.abs(lame_mu) == 0.0 and wp.abs(lame_lambda) == 0.0:
-            lame_mu = youngs_modulus / (2.0 * (1.0 + poisson_ratio))
-            lame_lambda = (youngs_modulus * poisson_ratio) / ((1.0 + poisson_ratio) * (1.0 - 2.0 * poisson_ratio))
+            lame_mu = youngs_modulus / (2.0 * (1.0 + poissons_ratio))
+            lame_lambda = (youngs_modulus * poissons_ratio) / ((1.0 + poissons_ratio) * (1.0 - 2.0 * poissons_ratio))
         self.lame_mu = lame_mu
         self.lame_lambda = lame_lambda
         print(f"Using Lame parameters: mu = {self.lame_mu:.1f}, lambda = {self.lame_lambda:.1f}")
 
         ### Compute inverted undeformed/reference shape matrix, mass, volume per element
+        n_vertices = initial_positions.shape[0]
         n_elements = elements.shape[0]
         self.inv_Dm = wp.zeros(n_elements, dtype=wp.mat33d, device=device)
         self.masses = wp.zeros(n_elements, dtype=wp.float64, device=device)
@@ -397,6 +396,38 @@ class VBDSolver:
         dDs_dx[3][2] = np.array([-0.0, -0.0, -0.0, -0.0, -0.0, -0.0, -1.0, -1.0, -1.0]).reshape(3,3)
 
         self.dDs_dx = wp.array(dDs_dx, dtype=wp.mat33d, device=device)
+
+
+        ### Perform graph coloring
+        start_time = time.time()
+        adjacency, vertex_valence = compute_adjacency_dict(elements.numpy())
+        _, color_groups = graph_coloring(adjacency)
+        end_time = time.time()
+        print(f"Assigned {len(color_groups)} colors in {(end_time - start_time)*1000:.4f}ms. Vertex valence: {vertex_valence}")
+        # Convert color groups to full array
+        n_colors = len(color_groups)
+        max_group_size = max(len(g) for g in color_groups.values())
+        colors = np.full([n_colors, max_group_size], -1, dtype=int)
+        for c in range(n_colors):
+            group = color_groups[c]
+            colors[c, :len(group)] = group
+        self.color_groups = wp.array(colors, dtype=wp.int32, device=device)
+
+        ### Find an adjacency mapping from vertex -> neighboring elements
+        adj_v2e_list = [[] for _ in range(n_vertices)]
+        max_incident_elements = 0
+        for i, ele in enumerate(elements.numpy()):
+            for vertex in ele:
+                adj_v2e_list[vertex].append(i)
+                max_incident_elements = max(max_incident_elements, len(adj_v2e_list[vertex]))
+        print(f"Max incident elements per vertex: {max_incident_elements}")
+        # Create fixed-size adjacency array
+        adj_v2e = np.full((n_vertices, max_incident_elements), -1, dtype=int)
+        for vertex in range(n_vertices):
+            for j, ele_idx in enumerate(adj_v2e_list[vertex]):
+                adj_v2e[vertex, j] = ele_idx
+        self.adj_v2e = wp.array(adj_v2e, dtype=wp.int32, device=device)
+
 
 
     def reset (self) -> None:
@@ -460,7 +491,7 @@ class VBDSolver:
              
             hist["dx"].append(abs(dxs.numpy()).mean())
             hist["grad"].append(abs(grads.numpy()).mean())
-            if abs(dxs.numpy().sum(1)).max() < 1e-9:
+            if abs(dxs.numpy().sum(1)).max() < 1e-6:
                 break
         
         if i == MAX_ITER - 1:
@@ -492,6 +523,7 @@ class VBDSolver:
 
         # Discretize velocities, implicit Euler
         self.old_velocities = (new_positions - self.old_positions) / dt
+        self.old_positions = new_positions
 
         return new_positions
 
