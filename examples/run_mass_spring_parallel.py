@@ -27,7 +27,7 @@ class MassSpringParallelSim:
     """
     Lots of Mass Spring System simulations in parallel, where the masses are standardized as a 1m x 1m x 1m cube of 1kg. Stiffnesses are varied between the simulations.
     """
-    def __init__ (self, nsim=4, nx=7, density=1, youngs_modulus=10e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=1000, device="cuda"):
+    def __init__ (self, nsim=4, nx=7, density=1, youngs_modulus=15e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=1000, device="cuda"):
         ### Set up tetrahedral mesh
         dx = 1.0/nx
         self.nsim = nsim
@@ -181,7 +181,7 @@ def main (args):
         os.makedirs(f"{output_folder}/frames", exist_ok=False)
 
     # Set up simulation
-    sim = MassSpringParallelSim(nsim=args.nsim, nx=args.nx, dx_tol=1e-5, device="cuda")
+    sim = MassSpringParallelSim(nsim=args.nsim, nx=args.nx, dx_tol=1e-6, device="cuda")
 
     ### Begin the solve
     n_seconds = 5.0

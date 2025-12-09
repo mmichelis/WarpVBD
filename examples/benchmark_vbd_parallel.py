@@ -24,8 +24,8 @@ if __name__ == "__main__":
     device = "cuda"
     wp.init()
 
-    n_samples = 1
-    nsims = [2**i for i in range(0, 12)]
+    n_samples = 3
+    nsims = [2**i for i in range(0, 13)]
     metrics = {
         "n_vertices": [],
         "n_simulations": [],

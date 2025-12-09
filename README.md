@@ -15,7 +15,7 @@ conda activate warp_vbd
 
 ## Demos
 
-We present several examples that show the usecases of the simulator.
+We present several examples that show the usecases of the simulator. The first time the VBD solver is compiled, it can take about 20s. Please be patient when running the code.
 
 ### Cantilever
 
@@ -75,7 +75,19 @@ We do 1000 timesteps of 1ms, sampled 3 times for mean and standard deviation in 
 The tolerance plays quite a crucial role depending on the application, here 1e-7 is a good balance between accuracy and speed, but this should be checked per simulation.
 
 
+### Parallelization of Mass Spring
 
-## Notes
+We test the ability of parallel environments to achieve real-time performance for soft body simulations. We build upon the mass spring system from our demos, but put these in a parallel setting where multiple mass spring systems are simulated at the same time. This does not increase the number of color groups, hence heavily leverages the parallelization benefits of VBD.
 
-The compilation of the VBD solver kernel takes about 20s, so please be patient the first time the warp kernel is compiled.
+Our parallel simulation environment can be run with an arbitrary number of environments with 
+```
+python examples/run_mass_spring_parallel.py --render --nsim 16
+```
+We benchmarked the runtime per environment, and how parallelization can speed this up, and see that faster than realtime performance is possible when the number of simulations is roughly larger than 16. These results can be reproduced with
+```
+python examples/benchmark_vbd_parallel.py
+```
+
+![](asset/imgs/mass_spring_parallel.gif)
+<img src="asset/imgs/benchmark_realtime_parallel.png" height="300px"/>
+
