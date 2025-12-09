@@ -11,12 +11,20 @@ from _utils import voxel2hex, hex2tets
 from _renderer import PbrtRenderer, export_mp4
 import vbd_solver
 
+# Matplotlib global settings
+plt.rcParams.update({"font.size": 7})
+plt.rcParams.update({"pdf.fonttype": 42})# Prevents type 3 fonts (deprecated in paper submissions)
+plt.rcParams.update({"ps.fonttype": 42}) # Prevents type 3 fonts (deprecated in paper submissions)
+plt.rcParams.update({"text.usetex": True})
+plt.rcParams.update({"font.family": 'serif'})#, "font.serif": ['Computer Modern']})
+mm = 1/25.4
+
 
 class MassSpringSim:
     """
     Mass Spring System Simulation, where the mass is standardized as a 1m x 1m x 1m cube of 1kg. 
     """
-    def __init__ (self, nx=11, density=1, youngs_modulus=5e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=1000, device="cuda"):
+    def __init__ (self, nx=11, density=1, youngs_modulus=9e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=1000, device="cuda"):
         ### Set up tetrahedral mesh
         dx = 1.0/nx
         voxels = np.ones((nx, nx, 2*nx), dtype=bool)
@@ -123,7 +131,7 @@ def main (args):
     sim = MassSpringSim(nx=args.nx, dx_tol=1e-5, device="cuda")
 
     ### Begin the solve
-    n_seconds = 2.0
+    n_seconds = 5.0
     fps = 50
     n_timesteps = int(n_seconds * fps)
     n_substeps = 5

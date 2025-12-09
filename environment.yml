@@ -1,0 +1,9 @@
+name: warp_vbd
+channels:
+  - defaults
+dependencies:
+  - pip
+  - pip:
+      - matplotlib
+      - numpy
+      - warp-lang==1.10.0

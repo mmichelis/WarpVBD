@@ -11,6 +11,14 @@ from _utils import voxel2hex, hex2tets
 from _renderer import PbrtRenderer, export_mp4
 import vbd_solver
 
+# Matplotlib global settings
+plt.rcParams.update({"font.size": 7})
+plt.rcParams.update({"pdf.fonttype": 42})# Prevents type 3 fonts (deprecated in paper submissions)
+plt.rcParams.update({"ps.fonttype": 42}) # Prevents type 3 fonts (deprecated in paper submissions)
+plt.rcParams.update({"text.usetex": True})
+plt.rcParams.update({"font.family": 'serif'})#, "font.serif": ['Computer Modern']})
+mm = 1/25.4
+
 
 class CantileverSim:
     def __init__ (self, nx=(10, 3, 3), dx=(0.01, 0.01, 0.01), density=1070, youngs_modulus=250e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=100, device="cuda"):
@@ -112,11 +120,11 @@ class CantileverSim:
 
 
 def main (args):
-    ### Set up tetrahedral mesh
+    # Set up simulation
     sim = CantileverSim(
         nx=(args.nx, args.ny, args.nz), 
         dx=(args.dx, args.dy, args.dz), 
-        density=1070, youngs_modulus=250e3, poissons_ratio=0.45,
+        density=1070, youngs_modulus=150e3, poissons_ratio=0.45,
         dx_tol=1e-9, device="cuda"
     )
 
@@ -139,7 +147,7 @@ def main (args):
         print(f"---Timestep [{t:04d}/{n_timesteps}] ({1e3*dt*n_substeps:.1f}ms) in {1e3*(end_time - start_time):.3f}ms: Mean Positions: {solution.numpy().mean(axis=0)}")
 
         if args.render:
-            sim.render(solution.numpy(), filename=f"outputs/sim/cantilever_{t:03d}.png", spp=64)
+            sim.render(solution.numpy(), filename=f"outputs/sim/cantilever_{t:03d}.png", spp=4)
 
         # Plot Tip Displacements
         fig, ax = plt.subplots(figsize=(3,2))
