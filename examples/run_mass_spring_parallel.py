@@ -23,24 +23,48 @@ plt.rcParams.update({"font.family": 'serif'})#, "font.serif": ['Computer Modern'
 mm = 1/25.4
 
 
-class MassSpringSim:
+class MassSpringParallelSim:
     """
-    Mass Spring System Simulation, where the mass is standardized as a 1m x 1m x 1m cube of 1kg. 
+    Lots of Mass Spring System simulations in parallel, where the masses are standardized as a 1m x 1m x 1m cube of 1kg. Stiffnesses are varied between the simulations.
     """
-    def __init__ (self, nx=11, density=1, youngs_modulus=9e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=1000, device="cuda"):
+    def __init__ (self, nsim=4, nx=7, density=1, youngs_modulus=9e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=1000, device="cuda"):
         ### Set up tetrahedral mesh
         dx = 1.0/nx
-        voxels = np.ones((nx, nx, 2*nx), dtype=bool)
-        voxels[:,:,nx:] = False
-        voxels[int(nx//2):int(nx//2)+1,int(nx//2):int(nx//2)+1,nx:] = True
+        # Split parallel simulations into xy grid
+        nsimy = int(np.ceil(np.sqrt(nsim)))
+        nsimx = int(np.ceil(nsim / nsimy))
+        padding_voxels = nx//2 # Padding between simulations
+
+        ### Add a wall plane as a hex mesh box. Center should align with mass spring top center.
+        voxels = np.zeros((nsimx*(nx+padding_voxels)-padding_voxels, nsimy*(nx+padding_voxels)-padding_voxels, 2*nx), dtype=bool)
+        wall_voxels = np.zeros((nsimx*(nx+padding_voxels)-padding_voxels, nsimy*(nx+padding_voxels)-padding_voxels, 1), dtype=bool)
+        for i in range(nsimx):
+            for j in range(nsimy):
+                sim_idx = i*nsimy + j
+                if sim_idx >= nsim:
+                    break
+                x_start = i*(nx+padding_voxels)
+                y_start = j*(nx+padding_voxels)
+                voxels[x_start:x_start+nx, y_start:y_start+nx, :nx] = True
+                voxels[x_start+nx//2:x_start+nx//2+1, y_start+nx//2:y_start+nx//2+1, nx:] = True
+                wall_voxels[x_start:x_start+nx, y_start:y_start+nx, 0] = True
+
         vertices, hex_elements = voxel2hex(voxels, dx, dx, dx)
-        vertices[:,:2] -= vertices.mean(axis=0)[:2]
+        self.wall_vertices, self.wall_elements = voxel2hex(wall_voxels, dx, dx, 0.1)
+        print(f"Voxel shape: {voxels.shape}.")
+
+        # Center x-axis
+        translation_x = 0.5 * (vertices[:,0].max() + vertices[:,0].min())
+        vertices[:,0] -= translation_x
+        self.wall_vertices[:,0] -= translation_x
+        self.wall_vertices[:,2] += 2*nx*dx
+
         elements = hex2tets(hex_elements)
         n_vertices = vertices.shape[0]
         n_elements = elements.shape[0]
         self.initial_positions = vertices
         self.elements = elements
-        print(f"Generated tetrahedral mesh with {n_vertices} vertices and {n_elements} elements.")
+        print(f"\033[95mGenerated tetrahedral mesh with {n_vertices} vertices and {n_elements} elements.\033[0m")
 
         # Set active mask
         active_mask = np.ones((vertices.shape[0],), dtype=bool)
@@ -74,12 +98,9 @@ class MassSpringSim:
             device=device
         )
 
-        ### Add a wall plane as a hex mesh box. Center should align with mass spring top center.
-        com = vertices.mean(axis=0)
-        wall_width, wall_depth, wall_height = 1.0, 1.0, 0.1
-        wall_translation = np.array([com[0]-wall_width/2, com[1]-wall_depth/2, 2*nx*dx])
-        self.wall_vertices, self.wall_elements = voxel2hex(np.ones((1,1,1), dtype=bool), wall_width, wall_depth, wall_height)
-        self.wall_vertices += wall_translation
+        # Adjust camera based on number of simulations
+        self.camera_pos = (0.0, -0.75-0.4*(nsimx//2), 0.3)
+        self.camera_lookat = (0.0, 0.25, 0.1)
 
 
     def step (self, dt):
@@ -100,8 +121,8 @@ class MassSpringSim:
             'light_map': 'uffizi-large.exr',
             'sample': spp,
             'max_depth': 2,
-            'camera_pos': (0.0, -0.75, 0.3),   # Position of camera
-            'camera_lookat': (0.0, 0.25, 0.1),     # Position that camera looks at
+            'camera_pos': self.camera_pos,
+            'camera_lookat': self.camera_lookat,
         }
         transforms=[
             ('s', 0.1),
@@ -125,13 +146,15 @@ class MassSpringSim:
 
         renderer.render()
 
+        assert False
+
     def reset (self):
         self.solver.reset()
 
 
 def main (args):
     # Create output directories
-    output_folder = "outputs/mass_spring"
+    output_folder = "outputs/mass_spring_parallel"
     os.makedirs(output_folder, exist_ok=True)
     if args.render:
         if os.path.isdir(f"{output_folder}/frames"):
@@ -139,7 +162,7 @@ def main (args):
         os.makedirs(f"{output_folder}/frames", exist_ok=False)
 
     # Set up simulation
-    sim = MassSpringSim(nx=args.nx, dx_tol=1e-5, device="cuda")
+    sim = MassSpringParallelSim(nsim=args.nsim, nx=args.nx, dx_tol=1e-5, device="cuda")
 
     ### Begin the solve
     n_seconds = 5.0
@@ -184,7 +207,8 @@ def main (args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--nx", type=int, default=11, help="Number of voxels in x direction")
+    parser.add_argument("--nsim", type=int, default=6, help="Number of parallel simulations")
+    parser.add_argument("--nx", type=int, default=7, help="Number of voxels in x direction")
     parser.add_argument("--dx", type=float, default=0.01, help="Voxel size in x direction")
     parser.add_argument("--render", action='store_true', help="Visualize option")
     args = parser.parse_args()
