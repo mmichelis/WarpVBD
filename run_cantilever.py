@@ -5,7 +5,7 @@ import warp as wp
 
 import matplotlib.pyplot as plt
 import argparse
-import time
+import time, os, shutil
 
 from _utils import voxel2hex, hex2tets
 from _renderer import PbrtRenderer, export_mp4
@@ -120,6 +120,13 @@ class CantileverSim:
 
 
 def main (args):
+    # Create output directories
+    output_folder = "outputs_/cantilever"
+    os.makedirs(output_folder, exist_ok=True)
+    if os.path.isdir(f"{output_folder}/frames"):
+        shutil.rmtree(f"{output_folder}/frames")
+    os.makedirs(f"{output_folder}/frames", exist_ok=False)
+
     # Set up simulation
     sim = CantileverSim(
         nx=(args.nx, args.ny, args.nz), 
@@ -147,7 +154,7 @@ def main (args):
         print(f"---Timestep [{t:04d}/{n_timesteps}] ({1e3*dt*n_substeps:.1f}ms) in {1e3*(end_time - start_time):.3f}ms: Mean Positions: {solution.numpy().mean(axis=0)}")
 
         if args.render:
-            sim.render(solution.numpy(), filename=f"outputs/sim/cantilever_{t:03d}.png", spp=4)
+            sim.render(solution.numpy(), filename=f"{output_folder}/frames/cantilever_{t:03d}.png", spp=4)
 
         # Plot Tip Displacements
         fig, ax = plt.subplots(figsize=(3,2))
@@ -158,15 +165,15 @@ def main (args):
         ax.grid()
         ax.set_xlim(0, n_seconds)
         ax.ticklabel_format(axis='both', style='sci', scilimits=(0,0))
-        fig.savefig("outputs/displacement_cantilever.png", dpi=300, bbox_inches='tight')
+        fig.savefig(f"{output_folder}/displacement_cantilever.png", dpi=300, bbox_inches='tight')
         plt.close(fig)
 
     # Store as csv
-    np.savetxt("outputs/displacement_cantilever.csv", tip_positions_np, delimiter=",")
+    np.savetxt(f"{output_folder}/displacement_cantilever.csv", np.array(tip_positions), delimiter=",")
 
     if args.render:
         # Render mp4
-        export_mp4("outputs/sim/", "outputs/cantilever.mp4", fps=int(0.25*fps), name_prefix="cantilever_")
+        export_mp4(f"{output_folder}/frames", f"{output_folder}/cantilever.mp4", fps=int(0.25*fps))
 
 
 if __name__ == "__main__":
