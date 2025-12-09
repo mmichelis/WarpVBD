@@ -33,7 +33,7 @@ class CantileverSim:
         n_elements = elements.shape[0]
         self.initial_positions = vertices
         self.elements = elements
-        print(f"Generated tetrahedral mesh with {n_vertices} vertices and {n_elements} elements.")
+        print(f"\033[95mGenerated tetrahedral mesh with {n_vertices} vertices and {n_elements} elements.\033[0m")
 
         # Set active mask
         active_mask = np.ones((vertices.shape[0],), dtype=bool)
