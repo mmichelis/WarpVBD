@@ -27,7 +27,7 @@ class MassSpringParallelSim:
     """
     Lots of Mass Spring System simulations in parallel, where the masses are standardized as a 1m x 1m x 1m cube of 1kg. Stiffnesses are varied between the simulations.
     """
-    def __init__ (self, nsim=4, nx=7, density=1, youngs_modulus=9e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=1000, device="cuda"):
+    def __init__ (self, nsim=4, nx=7, density=1, youngs_modulus=6e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=1000, device="cuda"):
         ### Set up tetrahedral mesh
         dx = 1.0/nx
         # Split parallel simulations into xy grid
@@ -66,7 +66,7 @@ class MassSpringParallelSim:
         self.elements = elements
         print(f"\033[95mGenerated tetrahedral mesh with {n_vertices} vertices and {n_elements} elements.\033[0m")
 
-        # Set active mask
+        ### Set active mask and tip indices
         active_mask = np.ones((vertices.shape[0],), dtype=bool)
         tip_idx = []
         for i in range(vertices.shape[0]):
@@ -77,19 +77,37 @@ class MassSpringParallelSim:
         self.tip_idx = tip_idx
         print(f"Active vertices: {np.sum(active_mask)}/{vertices.shape[0]}")
 
+        ### Assign varying stiffnesses for each simulation
+        youngs_moduli = np.zeros((n_elements,), dtype=np.float64)
+        poissons_ratios = poissons_ratio * np.ones((n_elements,), dtype=np.float64)
+        random_ym = np.random.uniform(-0.5, 0.5, size=(nsim,))
+        for i in range(n_elements):
+            # Determine which simulation this element belongs to
+            com = vertices[elements[i]].mean(axis=0)
+            sim_x = int(com[0] // ((nx+padding_voxels)*dx))
+            sim_y = int(com[1] // ((nx+padding_voxels)*dx))
+            sim_idx = sim_x * nsimy + sim_y
+            assert sim_idx < nsim, "Element assigned to non-existing simulation!"
+
+            # Random Young's modulus between simulations
+            youngs_moduli[i] = youngs_modulus * (1.0 + random_ym[sim_idx])
+        print(f"\033[95mYoung's modulus range: {youngs_moduli.min()/1e3:.2f}kPa to {youngs_moduli.max()/1e3:.2f}kPa.\033[0m")
+            
+
         ### Initialize solver
-        wp.init()
         solution = wp.array(vertices, dtype=wp.vec3d, device=device)
         elements = wp.array(elements, dtype=wp.vec4i, device=device)
         active_mask = wp.array(active_mask, dtype=wp.bool, device=device)
-        densities = wp.array(density * np.ones(n_elements), dtype=wp.float64, device=device)  # Uniform density
+        densities = wp.array(density * np.ones(n_elements), dtype=wp.float64, device=device)
+        youngs_moduli = wp.array(youngs_moduli, dtype=wp.float64, device=device)
+        poissons_ratios = wp.array(poissons_ratios, dtype=wp.float64, device=device)
 
         self.solver = vbd_solver.VBDSolver(
             initial_positions=solution,
             elements=elements,
             densities=densities,
-            youngs_modulus=youngs_modulus,
-            poissons_ratio=poissons_ratio,
+            youngs_modulus=youngs_moduli,
+            poissons_ratio=poissons_ratios,
             damping_coefficient=0.0,
             active_mask=active_mask,
             gravity=wp.vec3d(0.0, 0.0, -9.81),
@@ -207,6 +225,8 @@ def main (args):
 
 
 if __name__ == "__main__":
+    wp.init()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--nsim", type=int, default=6, help="Number of parallel simulations")
     parser.add_argument("--nx", type=int, default=7, help="Number of voxels in x direction")

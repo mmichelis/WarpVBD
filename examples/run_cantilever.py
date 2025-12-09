@@ -47,7 +47,6 @@ class CantileverSim:
         print(f"Active vertices: {np.sum(active_mask)}/{vertices.shape[0]}")
 
         ### Initialize solver
-        wp.init()
         solution = wp.array(vertices, dtype=wp.vec3d, device=device)
         elements = wp.array(elements, dtype=wp.vec4i, device=device)
         active_mask = wp.array(active_mask, dtype=wp.bool, device=device)
@@ -184,7 +183,7 @@ def main (args):
 
 if __name__ == "__main__":
     wp.init()
-    
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--nx", type=int, default=10, help="Number of voxels in x direction")
     parser.add_argument("--ny", type=int, default=3, help="Number of voxels in y direction")
