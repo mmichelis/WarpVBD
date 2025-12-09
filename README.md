@@ -23,12 +23,8 @@ A classical example for soft body simulation is a beam, fixed on one side, falli
 python run_cantilever.py --render
 ```
 
-<p align="center" style="display: flex; justify-content: center; gap: 20px;">
-    <video height="300px" controls>
-        <source src="asset/imgs/cantilever.mp4" type="video/mp4">
-    </video>
-    <img src="asset/imgs/displacement_cantilever.png" height="300px"/>
-</p>
+[![Full Quality Video](asset/imgs/cantilever.gif)](assets/cantilever.mp4)
+<img src="asset/imgs/displacement_cantilever.png" height="300px"/>
 
 
 ### Mass Spring System
@@ -38,13 +34,9 @@ Another standard soft body system is a mass falling under gravity attached throu
 python run_mass_spring.py --render
 ```
 
-<p align="center" style="display: flex; justify-content: center; gap: 20px;">
-    <video height="300px" controls>
-        <source src="asset/imgs/mass_spring.mp4" type="video/mp4">
-    </video>
-    <img src="asset/imgs/displacement_mass_spring.png" height="300px"/>
-</p>
 
+[![Full Quality Video](asset/imgs/mass_spring.gif)](assets/mass_spring.mp4)
+<img src="asset/imgs/displacement_mass_spring.png" height="300px"/>
 
 
 
