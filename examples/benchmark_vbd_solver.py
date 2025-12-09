@@ -26,7 +26,7 @@ if __name__ == "__main__":
     wp.init()
 
     ### Benchmark VBD solver performance scaling with mesh size
-    n_samples = 3
+    n_samples = 1
     reduction_factors = np.linspace(1, 10, 10, dtype=int)
     metrics = {
         "num_vertices": [],
@@ -42,14 +42,14 @@ if __name__ == "__main__":
             nx=(10*rf, 3*rf, 3*rf),
             dx=(dx, dx, dx),
             density=1070, youngs_modulus=150e3, poissons_ratio=0.45,
-            dx_tol=1e-7, max_iter=2000, device="cuda"
+            dx_tol=1e-9, max_iter=3000, device="cuda"
         )
         metrics["num_vertices"].append(sim.initial_positions.shape[0])
         metrics["num_elements"].append(sim.elements.shape[0])
 
         ### Benchmark solver time
         timestep = 1e-3
-        n_timesteps = 100
+        n_timesteps = 300
         
         tip_positions = []
         def vbd_solve (simulation, nt, dt):
@@ -91,10 +91,12 @@ if __name__ == "__main__":
         ax.grid()
         ax.set_xlim(0, time_axis[-1])
         ax.ticklabel_format(axis='both', style='sci', scilimits=(0,0))
-        ax.legend(loc="lower center", bbox_to_anchor=[0.5, -0.5], fontsize=7, ncol=3, fancybox=True, handlelength=0.75, columnspacing=1.25, handletextpad=0.5)
+        ax.legend(loc="upper center", bbox_to_anchor=[0.5, -0.25], fontsize=7, ncol=4, fancybox=True, handlelength=0.75, columnspacing=1.25, handletextpad=0.5)
         fig.savefig("outputs/benchmark_accuracy_vbd.png", dpi=300, bbox_inches='tight')
         plt.close(fig)
 
+        # Store metrics dictionary as npz
+        np.savez_compressed("outputs/benchmark_vbd_metrics.npz", **metrics)
 
 
 
