@@ -86,7 +86,7 @@ Our parallel simulation environment can be run with an arbitrary number of envir
 ```
 python examples/run_mass_spring_parallel.py --render --nsim 16
 ```
-We benchmarked the runtime per environment, and how parallelization can speed this up, and see that faster than realtime performance is possible when the number of simulations is roughly larger than 16. These results can be reproduced with
+We benchmarked the runtime per environment, and how parallelization can speed this up, and see that faster than realtime performance is possible when the number of simulations is roughly larger than 16. The benefit of parallelization slow down with larger number of environments. These results can be reproduced with
 ```
 python examples/benchmark_vbd_parallel.py
 ```
