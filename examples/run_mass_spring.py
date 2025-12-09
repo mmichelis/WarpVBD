@@ -59,13 +59,15 @@ class MassSpringSim:
         elements = wp.array(elements, dtype=wp.vec4i, device=device)
         active_mask = wp.array(active_mask, dtype=wp.bool, device=device)
         densities = wp.array(density * np.ones(n_elements), dtype=wp.float64, device=device)  # Uniform density
+        youngs_moduli = wp.array(youngs_modulus * np.ones(n_elements), dtype=wp.float64, device=device)
+        poissons_ratios = wp.array(poissons_ratio * np.ones(n_elements), dtype=wp.float64, device=device)
 
         self.solver = vbd_solver.VBDSolver(
             initial_positions=solution,
             elements=elements,
             densities=densities,
-            youngs_modulus=youngs_modulus,
-            poissons_ratio=poissons_ratio,
+            youngs_modulus=youngs_moduli,
+            poissons_ratio=poissons_ratios,
             damping_coefficient=0.0,
             active_mask=active_mask,
             gravity=wp.vec3d(0.0, 0.0, -9.81),
@@ -183,6 +185,8 @@ def main (args):
 
 
 if __name__ == "__main__":
+    wp.init()
+    
     parser = argparse.ArgumentParser()
     parser.add_argument("--nx", type=int, default=11, help="Number of voxels in x direction")
     parser.add_argument("--dx", type=float, default=0.01, help="Voxel size in x direction")

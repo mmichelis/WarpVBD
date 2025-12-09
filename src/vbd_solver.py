@@ -54,8 +54,8 @@ def elastic_gradient_hessian (
     volumes: wp.array(dtype=wp.float64),
     inv_Dm: wp.array(dtype=wp.mat33d),
     dDs_dx: wp.array2d(dtype=wp.mat33d),
-    lame_mu: wp.float64,
-    lame_lambda: wp.float64,
+    lame_mus: wp.array(dtype=wp.float64),
+    lame_lambdas: wp.array(dtype=wp.float64),
     elements: wp.array(dtype=wp.vec4i)
 ) -> tuple[wp.vec3d, wp.mat33d]:
     """
@@ -63,6 +63,8 @@ def elastic_gradient_hessian (
     """
     ele = elements[ele_idx]
     inv_D = inv_Dm[ele_idx]
+    lame_mu = lame_mus[ele_idx]
+    lame_lambda = lame_lambdas[ele_idx]
 
     ### Compute deformation gradient F
     x0 = positions[ele[0]]
@@ -154,8 +156,8 @@ def solve_grad_hess (
 
     masses: wp.array(dtype=wp.float64),
     volumes: wp.array(dtype=wp.float64),
-    lame_mu: wp.float64,
-    lame_lambda: wp.float64,
+    lame_mus: wp.array(dtype=wp.float64),
+    lame_lambdas: wp.array(dtype=wp.float64),
     damping_coefficient: wp.float64,
 
     gravity: wp.vec3d,
@@ -183,8 +185,8 @@ def solve_grad_hess (
 
         masses: Element masses.
         volumes: Element volumes.
-        lame_mu: Lame parameter mu.
-        lame_lambda: Lame parameter lambda.
+        lame_mus: Lame parameter mu.
+        lame_lambdas: Lame parameter lambda.
         damping_coefficient: Damping coefficient.
 
         gravity: Gravity vector.
@@ -220,7 +222,7 @@ def solve_grad_hess (
 
         ### Compute gradients and hessians
         grad_inertial, hess_inertia = inertial_gradient_hessian(idx_v, idx_e, positions, old_positions, old_velocities, masses, gravity, dt)
-        grad_elastic, hess_elastic = elastic_gradient_hessian(idx_v, idx_e, positions, volumes, inv_Dm, dDs_dx, lame_mu, lame_lambda, elements)
+        grad_elastic, hess_elastic = elastic_gradient_hessian(idx_v, idx_e, positions, volumes, inv_Dm, dDs_dx, lame_mus, lame_lambdas, elements)
         # Add damping
         grad_damping = damping_coefficient * hess_elastic * (positions[idx_v] - old_positions[idx_v]) / dt
         hess_damping = damping_coefficient * hess_elastic / dt
@@ -303,6 +305,25 @@ def compute_element_invDm_masses_volume (
             else:
                 assert wp.abs(res[r,c]) < EPS, "Singular matrix encountered in inv_Dm computation!"
 
+@wp.kernel
+def convert_youngs_poisson_to_lame (
+    youngs_modulus: wp.array(dtype=wp.float64),
+    poissons_ratio: wp.array(dtype=wp.float64),
+
+    lame_mus: wp.array(dtype=wp.float64),
+    lame_lambdas: wp.array(dtype=wp.float64)
+) -> None:
+    """
+    Convert Young's modulus and Poisson's ratio to Lame parameters mu and lambda.
+    """
+    i = wp.tid()
+
+    E = youngs_modulus[i]
+    nu = poissons_ratio[i]
+
+    lame_mus[i] = E / (wp.float64(2.0) * (wp.float64(1.0) + nu))
+    lame_lambdas[i] = (E * nu) / ((wp.float64(1.0) + nu) * (wp.float64(1.0) - wp.float64(2.0) * nu))
+    
 
 
 class VBDSolver:
@@ -312,10 +333,8 @@ class VBDSolver:
             elements: wp.array(dtype=wp.vec4i),
 
             densities: wp.array(dtype=wp.float64),
-            lame_mu: wp.float64 = wp.float64(0.0),
-            lame_lambda: wp.float64 = wp.float64(0.0),
-            youngs_modulus: wp.float64 = wp.float64(0.0),
-            poissons_ratio: wp.float64 = wp.float64(0.5),
+            youngs_modulus: wp.array(dtype=wp.float64),
+            poissons_ratio: wp.array(dtype=wp.float64),
             damping_coefficient: wp.float64 = wp.float64(1.0),
 
             active_mask: wp.array(dtype=wp.bool)=None,
@@ -334,10 +353,8 @@ class VBDSolver:
             elements: Mesh elements.
 
             densities: Element densities.
-            lame_mu: Lame parameter mu.
-            lame_lambda: Lame parameter lambda.
-            youngs_modulus: Young's modulus (not used if Lame parameters are provided).
-            poissons_ratio: Poisson's ratio (not used if Lame parameters are provided).
+            youngs_modulus: Young's modulus.
+            poissons_ratio: Poisson's ratio.
 
             gravity: Gravity vector.
             active_mask: Optional mask to indicate active vertices.
@@ -360,17 +377,23 @@ class VBDSolver:
         if active_mask is not None:
             self.active_mask = active_mask
         else:
-            self.active_mask = wp.ones(initial_positions.shape[0], dtype=wp.bool)
+            self.active_mask = wp.ones(initial_positions.shape[0], dtype=wp.bool, device=device)
     
         # If Lame parameters are not provided, compute them from Young's modulus and Poisson's ratio
-        if (wp.abs(lame_mu) == 0.0 and wp.abs(lame_lambda) == 0.0) and (wp.abs(youngs_modulus) == 0.0 or wp.abs(poissons_ratio) >= 0.5):
-            assert False, "Provide either Lame parameters or valid Young's modulus and Poisson's ratio!"
-        elif wp.abs(lame_mu) == 0.0 and wp.abs(lame_lambda) == 0.0:
-            lame_mu = youngs_modulus / (2.0 * (1.0 + poissons_ratio))
-            lame_lambda = (youngs_modulus * poissons_ratio) / ((1.0 + poissons_ratio) * (1.0 - 2.0 * poissons_ratio))
-        self.lame_mu = lame_mu
-        self.lame_lambda = lame_lambda
-        print(f"Using Lame parameters: mu = {self.lame_mu:.1f}, lambda = {self.lame_lambda:.1f}")
+        # if (wp.abs(lame_mu) == 0.0 and wp.abs(lame_lambda) == 0.0) and (wp.abs(youngs_modulus) == 0.0 or wp.abs(poissons_ratio) >= 0.5):
+        #     assert False, "Provide either Lame parameters or valid Young's modulus and Poisson's ratio!"
+        # elif wp.abs(lame_mu) == 0.0 and wp.abs(lame_lambda) == 0.0:
+        #     lame_mu = youngs_modulus / (2.0 * (1.0 + poissons_ratio))
+        #     lame_lambda = (youngs_modulus * poissons_ratio) / ((1.0 + poissons_ratio) * (1.0 - 2.0 * poissons_ratio))
+        self.lame_mus = wp.zeros(youngs_modulus.shape[0], dtype=wp.float64, device=device)
+        self.lame_lambdas = wp.zeros(youngs_modulus.shape[0], dtype=wp.float64, device=device)
+        wp.launch(
+            convert_youngs_poisson_to_lame,
+            dim=youngs_modulus.shape[0],
+            inputs=[youngs_modulus, poissons_ratio],
+            outputs=[self.lame_mus, self.lame_lambdas],
+            device=device
+        )
 
         ### Compute inverted undeformed/reference shape matrix, mass, volume per element
         n_vertices = initial_positions.shape[0]
@@ -493,7 +516,7 @@ class VBDSolver:
                     inputs=[
                         new_positions, self.old_positions, self.old_velocities, 
                         self.inv_Dm, self.dDs_dx, 
-                        self.masses, self.volumes, self.lame_mu, self.lame_lambda, self.damping_coefficient,
+                        self.masses, self.volumes, self.lame_mus, self.lame_lambdas, self.damping_coefficient,
                         self.gravity, dt, 
                         self.elements, self.adj_v2e, self.color_groups[c], self.active_mask
                     ],
