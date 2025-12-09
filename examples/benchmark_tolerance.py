@@ -6,8 +6,11 @@ import warp as wp
 
 import matplotlib.pyplot as plt
 
+import sys
+sys.path.append("./src")
+
 from run_cantilever import CantileverSim
-from _benchmark import benchmark_functions
+from _utils import benchmark_functions
 
 # Matplotlib global settings
 plt.rcParams.update({"font.size": 7})

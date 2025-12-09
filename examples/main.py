@@ -6,6 +6,9 @@ import matplotlib.pyplot as plt
 import argparse
 import time
 
+import sys
+sys.path.append("./src")
+
 from _utils import voxel2hex, hex2tets
 from _renderer import PbrtRenderer, export_mp4
 from _coloring import graph_coloring, compute_adjacency_dict

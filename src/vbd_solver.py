@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import warp as wp
 
-from _coloring import graph_coloring, compute_adjacency_dict
+from coloring import graph_coloring, compute_adjacency_dict
 
 EPS = 1e-12
 

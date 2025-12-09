@@ -21,7 +21,7 @@ We present several examples that show the usecases of the simulator.
 
 A classical example for soft body simulation is a beam, fixed on one side, falling under gravity. We show the displacement of the free tip face of the beam on the right. This example can be reproduced by running:
 ```
-python run_cantilever.py --render
+python examples/run_cantilever.py --render
 ```
 
 [![Full Quality Video](asset/imgs/cantilever.gif)](asset/imgs/cantilever.mp4)
@@ -32,7 +32,7 @@ python run_cantilever.py --render
 
 Another standard soft body system is a mass falling under gravity attached through a thin string spring. We approximate the whole structure with voxels, which are converted to tetrahedral elements, where the mass' edges are by default 11 voxels and the spring is 1 voxel. The top of the spring is fixed in space. We show the displacement of the free bottom face of the mass on the right. This example can be reproduced by running:
 ```
-python run_mass_spring.py --render
+python examples/run_mass_spring.py --render
 ```
 
 
@@ -48,7 +48,7 @@ We also showcase how the implementation runtime scales with tolerance as well as
 
 Here we vary the number of vertices that are used for the cantilever mesh. Since we use a voxel mesh that is tetrahedralized, we can vary the number of voxels on each edge.
 ```
-python benchmark_vbd_solve.py
+python examples/benchmark_vbd_solve.py
 ```
 We do 100 timesteps of 1ms, sampled 3 times for mean and standard deviation in the runtime plot (standard deviation is too small to be visible), but multiply this by 10 for how long a simulated second would have taken.
 
@@ -63,7 +63,7 @@ This near-linear scaling towards the larger vertices indicates proper paralleliz
 
 We vary the position update tolerance that is allowed for the VBD solver to be considered converged. When the position error during iterations fall below this tolerance, the solver returns the solution. Maximum iterations of the VBD solver is set high enough such that the limit is never reached. This example can be run with:
 ```
-python benchmark_tolerance.py
+python examples/benchmark_tolerance.py
 ```
 We do 1000 timesteps of 1ms, sampled 3 times for mean and standard deviation in the runtime plot (standard deviation is too small to be visible).
 

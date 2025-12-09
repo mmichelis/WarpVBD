@@ -5,6 +5,9 @@ import warp as wp
 
 import matplotlib.pyplot as plt
 
+import sys
+sys.path.append("./src")
+
 from _benchmark import benchmark_functions
 
 # Matplotlib global settings
