@@ -54,9 +54,12 @@ We do 100 timesteps of 1ms, sampled 3 times for mean and standard deviation in t
 
 <p align="left">
     <img src="asset/imgs/benchmark_runtime_vbd.png" width="400px" align="top"/>
+    <img src="asset/imgs/benchmark_accuracy_vbd.png" width="400px" align="top"/>
 </p>
 
 This near-linear scaling towards the larger vertices indicates proper parallelization on the GPU, where the number of color groups (7 in this case) remains constant for all vertex counts. At smaller number of vertices the Python overhead is too large, and the Nvidia Warp acceleration is not clear yet.
+
+On the right we can observe how the different number of vertices affect the numerical result. A certain resolution is required to converge to the ground truth, here run with a position update tolerance of 1e-9 for guaranteed accuracy.
 
 
 ### Tolerance
