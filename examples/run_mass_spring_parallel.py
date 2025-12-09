@@ -27,7 +27,7 @@ class MassSpringParallelSim:
     """
     Lots of Mass Spring System simulations in parallel, where the masses are standardized as a 1m x 1m x 1m cube of 1kg. Stiffnesses are varied between the simulations.
     """
-    def __init__ (self, nsim=4, nx=7, density=1, youngs_modulus=6e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=1000, device="cuda"):
+    def __init__ (self, nsim=4, nx=7, density=1, youngs_modulus=8e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=1000, device="cuda"):
         ### Set up tetrahedral mesh
         dx = 1.0/nx
         self.nsim = nsim
@@ -203,12 +203,12 @@ def main (args):
         print(f"---Timestep [{t:04d}/{n_timesteps}] ({1e3*dt*n_substeps:.1f}ms) in {1e3*(end_time - start_time):.3f}ms: Mean Positions: {solution.numpy().mean(axis=0)}")
 
         if args.render:
-            sim.render(solution.numpy(), filename=f"{output_folder}/frames/mass_spring_parallel_{t:03d}.png", spp=4)
+            sim.render(solution.numpy(), filename=f"{output_folder}/frames/mass_spring_parallel_{t:03d}.png", spp=64)
 
         # Plot Tip Displacements
         fig, ax = plt.subplots(figsize=(3,2))
-        tip_positions_np = np.array(tip_positions)
-        ax.plot(np.arange(len(tip_positions_np)) * dt, tip_positions_np[:, 2])  # Plot z displacement over time
+        for tp in tip_positions.values():
+            ax.plot(np.arange(len(tp)) * dt, np.array(tp)[:, 2])
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Z Position (m)")
         ax.grid()
