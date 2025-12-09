@@ -23,7 +23,7 @@ A classical example for soft body simulation is a beam, fixed on one side, falli
 python run_cantilever.py --render
 ```
 
-[![Full Quality Video](asset/imgs/cantilever.gif)](assets/imgs/cantilever.mp4)
+[![Full Quality Video](asset/imgs/cantilever.gif)](asset/imgs/cantilever.mp4)
 <img src="asset/imgs/displacement_cantilever.png" height="300px"/>
 
 
@@ -35,7 +35,7 @@ python run_mass_spring.py --render
 ```
 
 
-[![Full Quality Video](asset/imgs/mass_spring.gif)](assets/imgs/mass_spring.mp4)
+[![Full Quality Video](asset/imgs/mass_spring.gif)](asset/imgs/mass_spring.mp4)
 <img src="asset/imgs/displacement_mass_spring.png" height="300px"/>
 
 
