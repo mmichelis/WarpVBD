@@ -24,7 +24,7 @@ if __name__ == "__main__":
 
     ### Benchmark VBD solver performance scaling with mesh size
     num_samples = 3
-    tolerances = [1e-7, 5e-8, 1e-8, 5e-9, 1e-9]
+    tolerances = [1e-6, 5e-7, 1e-7, 5e-8, 1e-8]
     metrics = {
         "tolerance": [],
         "times": {
@@ -57,36 +57,35 @@ if __name__ == "__main__":
         metrics["tip_positions"].append(np.array(tip_positions))
         
         ### Plot performance scaling
-        fig, ax = plt.subplots(1, 1, figsize=(120*mm, 70*mm))
+        fig, ax = plt.subplots(1, 1, figsize=(3,2))
         for method in metrics["times"]:
-            times_mean = [np.mean(t)/n_timesteps for t in metrics["times"][method]]
-            times_std = [np.std(t)/n_timesteps for t in metrics["times"][method]]
+            times_mean = [np.mean(t)/(timestep*n_timesteps) for t in metrics["times"][method]]
+            times_std = [np.std(t)/(timestep*n_timesteps) for t in metrics["times"][method]]
             ax.plot(metrics["tolerance"], times_mean, 'o-', label=method)
             ax.fill_between(metrics["tolerance"], np.array(times_mean)-np.array(times_std), np.array(times_mean)+np.array(times_std), alpha=0.3)
         ax.set_xscale('log')
         # ax.set_yscale('log')
         ax.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
-        ax.set_xlabel("dx tolerance (m)")
-        ax.set_ylabel("Time per Step (s)")
-        ax.legend()
+        ax.set_xlabel(r"$\Delta$x Tolerance (m)")
+        ax.set_ylabel("Time per Simulated Second (s)")
+        # ax.legend()
         ax.grid()
-        fig.suptitle("VBD Solve Tolerance Scaling")
-
+        # fig.suptitle("VBD Solve Tolerance Scaling")
         fig.savefig("outputs/benchmark_runtime_tolerance.png", dpi=300, bbox_inches='tight')
         plt.close(fig)
 
 
         ### Plot Tip Displacements
-        fig, ax = plt.subplots(1, 1, figsize=(120*mm, 70*mm))
+        fig, ax = plt.subplots(1, 1, figsize=(3,2))
         time_axis = np.arange(n_timesteps) * timestep
         for i, tol in enumerate(metrics["tolerance"]):
-            ax.plot(time_axis, metrics["tip_positions"][i][:, 2], label=f"tol={tol:.1e}")
+            ax.plot(time_axis, metrics["tip_positions"][i][:, 2], label=f"dx_tol={tol:.0e}")
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Z Position (m)")
-        ax.legend()
         ax.grid()
         ax.set_xlim(0, time_axis[-1])
         ax.ticklabel_format(axis='both', style='sci', scilimits=(0,0))
+        ax.legend(loc="lower center", bbox_to_anchor=[0.5, -0.5], fontsize=7, ncol=3, fancybox=True, handlelength=0.75, columnspacing=1.25, handletextpad=0.5)
         fig.savefig("outputs/benchmark_accuracy_tolerance.png", dpi=300, bbox_inches='tight')
         plt.close(fig)
 
