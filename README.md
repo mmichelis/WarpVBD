@@ -53,7 +53,7 @@ python examples/benchmark_vbd_solve.py
 We do 100 timesteps of 1ms, sampled 3 times for mean and standard deviation in the runtime plot (standard deviation is too small to be visible), but multiply this by 10 for how long a simulated second would have taken.
 
 <p align="left">
-    <img src="asset/imgs/benchmark_vbd_solve.png" width="400px" align="top"/>
+    <img src="asset/imgs/benchmark_runtime_vbd.png" width="400px" align="top"/>
 </p>
 
 This near-linear scaling towards the larger vertices indicates proper parallelization on the GPU, where the number of color groups (7 in this case) remains constant for all vertex counts. At smaller number of vertices the Python overhead is too large, and the Nvidia Warp acceleration is not clear yet.
