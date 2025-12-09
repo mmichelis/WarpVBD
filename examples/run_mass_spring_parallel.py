@@ -33,7 +33,7 @@ class MassSpringParallelSim:
         # Split parallel simulations into xy grid
         nsimy = int(np.ceil(np.sqrt(nsim)))
         nsimx = int(np.ceil(nsim / nsimy))
-        padding_voxels = nx//2 # Padding between simulations
+        padding_voxels = int(1.0*nx) # Padding between simulations
 
         ### Add a wall plane as a hex mesh box. Center should align with mass spring top center.
         voxels = np.zeros((nsimx*(nx+padding_voxels)-padding_voxels, nsimy*(nx+padding_voxels)-padding_voxels, 2*nx), dtype=bool)
@@ -54,9 +54,9 @@ class MassSpringParallelSim:
         print(f"Voxel shape: {voxels.shape}.")
 
         # Center x-axis
-        translation_x = 0.5 * (vertices[:,0].max() + vertices[:,0].min())
-        vertices[:,0] -= translation_x
-        self.wall_vertices[:,0] -= translation_x
+        # center_x = 0.5 * (vertices[:,0].max() + vertices[:,0].min())
+        # vertices[:,0] -= center_x
+        # self.wall_vertices[:,0] -= center_x
         self.wall_vertices[:,2] += 2*nx*dx
 
         elements = hex2tets(hex_elements)
@@ -99,8 +99,10 @@ class MassSpringParallelSim:
         )
 
         # Adjust camera based on number of simulations
-        self.camera_pos = (0.0, -0.75-0.4*(nsimx//2), 0.3)
-        self.camera_lookat = (0.0, 0.25, 0.1)
+        # self.camera_pos = (-0.01*(nsim//2), -0.75-0.2*(nsimx//2), 0.4)
+        # self.camera_lookat = (0.1+0.01*(nsim//2), 0.25, 0.2)
+        self.camera_pos = (-0.02*(nsimx//2), -1.0-0.02*(nsimy//2), 0.4)
+        self.camera_lookat = (0.1*(nsimx*(nx+padding_voxels)*dx/2), 0.1*(0.5+nsimy*(nx+padding_voxels)*dx/2), 0.1)
 
 
     def step (self, dt):
@@ -123,6 +125,7 @@ class MassSpringParallelSim:
             'max_depth': 2,
             'camera_pos': self.camera_pos,
             'camera_lookat': self.camera_lookat,
+            'resolution': (800, 800)
         }
         transforms=[
             ('s', 0.1),
@@ -145,8 +148,6 @@ class MassSpringParallelSim:
         renderer.add_hex_mesh(vertices=self.wall_vertices, elements=self.wall_elements, color="2ca02c", transforms=transforms)
 
         renderer.render()
-
-        assert False
 
     def reset (self):
         self.solver.reset()

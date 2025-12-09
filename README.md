@@ -61,7 +61,7 @@ This near-linear scaling towards the larger vertices indicates proper paralleliz
 
 ### Tolerance
 
-We vary the position update tolerance that is allowed for the VBD solver to be considered converged. When the position error during iterations fall below this tolerance, the solver returns the solution. Maximum iterations of the VBD solver is set high enough such that the limit is never reached. This example can be run with:
+We vary the position update tolerance that is allowed for the VBD solver to be considered converged. When the position update norm during iterations fall below this tolerance, the solver returns the solution. Maximum iterations of the VBD solver is set high enough such that we can always reach the tolerance. This example can be run with:
 ```
 python examples/benchmark_tolerance.py
 ```
