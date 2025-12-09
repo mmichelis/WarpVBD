@@ -27,7 +27,7 @@ class MassSpringParallelSim:
     """
     Lots of Mass Spring System simulations in parallel, where the masses are standardized as a 1m x 1m x 1m cube of 1kg. Stiffnesses are varied between the simulations.
     """
-    def __init__ (self, nsim=4, nx=7, density=1, youngs_modulus=8e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=1000, device="cuda"):
+    def __init__ (self, nsim=4, nx=7, density=1, youngs_modulus=10e3, poissons_ratio=0.45, dx_tol=1e-9, max_iter=1000, device="cuda"):
         ### Set up tetrahedral mesh
         dx = 1.0/nx
         self.nsim = nsim
@@ -217,8 +217,8 @@ def main (args):
         fig.savefig(f"{output_folder}/displacement_mass_spring_parallel.png", dpi=300, bbox_inches='tight')
         plt.close(fig)
 
-    # Store as csv
-    np.savetxt(f"{output_folder}/displacement_mass_spring_parallel.csv", np.array(tip_positions), delimiter=",")
+    # Store tip positions as npz
+    np.savez_compressed(f"{output_folder}/tip_positions_mass_spring_parallel.npz", **tip_positions)
 
     if args.render:
         # Render mp4
