@@ -2,6 +2,8 @@
 
 Implementing VBD in NVIDIA Warp. Tetrahedral meshes supported with both St. Venant and Stable Neo-hookean material models. Original [Vertex Block Descent paper](https://dl.acm.org/doi/10.1145/3658179) by Chen et al. 2024.
 
+![](asset/imgs/mass_spring_parallel.gif)
+
 
 ## Installation
 
