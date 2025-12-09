@@ -25,7 +25,7 @@ if __name__ == "__main__":
     wp.init()
 
     n_samples = 1
-    nsims = np.linspace(1, 100, 11, dtype=int)
+    nsims = [2**i for i in range(0, 12)]
     metrics = {
         "n_vertices": [],
         "n_simulations": [],
@@ -41,7 +41,7 @@ if __name__ == "__main__":
 
         ### Benchmark solver time
         timestep = 4e-3
-        n_timesteps = 25
+        n_timesteps = 125
         
         def vbd_solve (simulation, nt, dt):
             simulation.reset()
@@ -76,7 +76,7 @@ if __name__ == "__main__":
         ax.axhline(y=1.0, color="gray", linestyle='--')
         ax.ticklabel_format(axis='both', style='sci', scilimits=(0,0))
         ax.set_xlabel("Number of Simulations (-)")
-        ax.set_ylabel("Realtime Factor per Env (x)")
+        ax.set_ylabel("Realtime Factor per Env (-)")
         ax.grid()
         fig.savefig("outputs/benchmark_realtime_parallel.png", dpi=300, bbox_inches='tight')
         plt.close(fig)
