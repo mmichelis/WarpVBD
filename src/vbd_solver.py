@@ -10,7 +10,6 @@ from coloring import graph_coloring, compute_adjacency_dict
 
 EPS = 1e-12
 MAX_ELEMENTS_PER_VERTEX = 32  # Adjust as needed for maximum number of elements incident to a vertex
-TILE_SIZE = 32
 
 
 @wp.func
@@ -236,48 +235,43 @@ def accumulate_grad_hess (
 
 @wp.kernel
 def solve_grad_hess (
+    positions: wp.array(dtype=wp.vec3d),
     gradients: wp.array3d(dtype=wp.float64),
     hessians: wp.array4d(dtype=wp.float64),
     active_mask: wp.array(dtype=wp.bool),
     color_group: wp.array(dtype=wp.int32),
 
+    new_positions: wp.array(dtype=wp.vec3d),
     dxs: wp.array2d(dtype=wp.float64)
 ) -> None:
+    """
+    Solve for position updates dx for all vertices in a color group, and apply updates to positions.
+    """
     i = wp.tid()
 
-    idx_v = wp.tile_load(color_group, shape=(TILE_SIZE), offset=i*TILE_SIZE)
+    idx_v = color_group[i]
+    if idx_v == -1:
+        return
+
+    # Skip if vertex is not active
+    if not active_mask[idx_v]:
+        return
     
-    grad = wp.tile_load_indexed(gradients, idx_v, (TILE_SIZE, MAX_ELEMENTS_PER_VERTEX, 3))
-    hess = wp.tile_load_indexed(hessians, idx_v, (TILE_SIZE, MAX_ELEMENTS_PER_VERTEX, 3, 3))
+    grad = wp.tile_load(gradients[idx_v], (MAX_ELEMENTS_PER_VERTEX, 3))
+    hess = wp.tile_load(hessians[idx_v], (MAX_ELEMENTS_PER_VERTEX, 3, 3))
     # Sum up contributions of elements to vertices
-    total_grad = wp.tile_sum(grad, axis=1)
-    total_hess = wp.tile_sum(hess, axis=1)
+    total_grad = wp.tile_sum(grad, axis=0)
+    total_hess = wp.tile_sum(hess, axis=0)
 
     # Solve for dx
     L = wp.tile_cholesky(total_hess)
     out = wp.tile_cholesky_solve(L, -total_grad)
     
     # Store results
-    wp.tile_store_indexed(dxs, idx_v, out)
+    wp.tile_store(dxs[idx_v], out)
 
-
-@wp.kernel
-def add_dx (
-    positions: wp.array(dtype=wp.vec3d),
-    dx: wp.array2d(dtype=wp.float64),
-    active_mask: wp.array(dtype=wp.bool),
-    color_group: wp.array(dtype=wp.int32),
-
-    new_positions: wp.array(dtype=wp.vec3d)
-) -> None:
-    i = wp.tid()
-    idx_v = color_group[i]
-    if idx_v == -1:
-        return
-    if not active_mask[idx_v]:
-        return
-
-    new_positions[idx_v] = positions[idx_v] + wp.vec3d(dx[idx_v,0], dx[idx_v,1], dx[idx_v,2])
+    # Add results
+    new_positions[idx_v] = positions[idx_v] + wp.vec3d(out[0], out[1], out[2])
 
 
 @wp.kernel
@@ -544,16 +538,18 @@ class VBDSolver:
             inputs=[self.old_positions, self.old_velocities, self.gravity, dt, self.active_mask],
             outputs=[new_positions]
         )
+        wp.synchronize_device(self.device)
 
         dxs = wp.zeros((n_vertices, 3), dtype=wp.float64)
         gradients = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3), dtype=wp.float64)
         hessians = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3, 3), dtype=wp.float64)
 
+        runtimes = {"accumulate": [], "solve": [], "add": []}
         hist = {"dx": [], "grad": []}
         for i in range(self.max_iter):
             # Loop over colors
             for c in range(n_colors):
-                wp.synchronize_device(self.device)
+                start_time = time.time()
                 wp.launch(
                     accumulate_grad_hess,
                     dim=[n_vertices_per_color, self.adj_v2e.shape[1]],
@@ -568,20 +564,19 @@ class VBDSolver:
                     device=self.device
                 )
                 wp.synchronize_device(self.device)
+                end_time = time.time()
+                runtimes["accumulate"].append((end_time - start_time)*1000)
+                start_time = time.time()
                 wp.launch_tiled(
                     solve_grad_hess,
-                    dim=n_vertices_per_color//TILE_SIZE,
-                    block_dim=TILE_SIZE,
-                    inputs=[gradients, hessians, self.active_mask, self.color_groups[c]],
-                    outputs=[dxs]
+                    dim=n_vertices_per_color,
+                    block_dim=64,
+                    inputs=[new_positions, gradients, hessians, self.active_mask, self.color_groups[c]],
+                    outputs=[new_positions, dxs]
                 )
                 wp.synchronize_device(self.device)
-                wp.launch(
-                    add_dx,
-                    dim=n_vertices_per_color,
-                    inputs=[new_positions, dxs, self.active_mask, self.color_groups[c]],
-                    outputs=[new_positions]
-                )
+                end_time = time.time()
+                runtimes["solve"].append((end_time - start_time)*1000)
 
             hist["dx"].append(abs(dxs.numpy()).mean())
             # hist["grad"].append(abs(grads.numpy()).mean())
@@ -591,6 +586,13 @@ class VBDSolver:
         if i == self.max_iter - 1:
             print(f"Warning: VBD solver did not converge within the maximum number of iterations. Final dx max: {abs(dxs.numpy()).max()}")
         # print(f"Iteration {i}: Maximum grad: {abs(grads.numpy()).max():.2e} \tMaximum dx: {abs(dxs.numpy()).max():.2e}")
+
+        # print runtime statistics
+        # total_accumulate = sum(runtimes["accumulate"])
+        # total_solve = sum(runtimes["solve"])
+        # total_add = sum(runtimes["add"])
+        # total_time = total_accumulate + total_solve + total_add
+        # print(f"VBD Solver converged in {i} iterations. Total time: {total_time:.2f}ms \t Accumulate: {total_accumulate:.2f}ms ({(total_accumulate/total_time)*100:.2f}%) \t Solve: {total_solve:.2f}ms ({(total_solve/total_time)*100:.2f}%) \t Add: {total_add:.2f}ms ({(total_add/total_time)*100:.2f}%)")
 
         plot = False
         if plot:
