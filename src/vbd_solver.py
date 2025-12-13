@@ -544,12 +544,10 @@ class VBDSolver:
         gradients = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3), dtype=wp.float64)
         hessians = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3, 3), dtype=wp.float64)
 
-        runtimes = {"accumulate": [], "solve": [], "add": []}
         hist = {"dx": [], "grad": []}
         for i in range(self.max_iter):
             # Loop over colors
             for c in range(n_colors):
-                start_time = time.time()
                 wp.launch(
                     accumulate_grad_hess,
                     dim=[n_vertices_per_color, self.adj_v2e.shape[1]],
@@ -564,9 +562,6 @@ class VBDSolver:
                     device=self.device
                 )
                 wp.synchronize_device(self.device)
-                end_time = time.time()
-                runtimes["accumulate"].append((end_time - start_time)*1000)
-                start_time = time.time()
                 wp.launch_tiled(
                     solve_grad_hess,
                     dim=n_vertices_per_color,
@@ -575,10 +570,8 @@ class VBDSolver:
                     outputs=[new_positions, dxs]
                 )
                 wp.synchronize_device(self.device)
-                end_time = time.time()
-                runtimes["solve"].append((end_time - start_time)*1000)
 
-            hist["dx"].append(abs(dxs.numpy()).mean())
+            # hist["dx"].append(abs(dxs.numpy()).mean())
             # hist["grad"].append(abs(grads.numpy()).mean())
             if abs(dxs.numpy().sum(1)).max() < dx_tol:
                 break
@@ -586,13 +579,6 @@ class VBDSolver:
         if i == self.max_iter - 1:
             print(f"Warning: VBD solver did not converge within the maximum number of iterations. Final dx max: {abs(dxs.numpy()).max()}")
         # print(f"Iteration {i}: Maximum grad: {abs(grads.numpy()).max():.2e} \tMaximum dx: {abs(dxs.numpy()).max():.2e}")
-
-        # print runtime statistics
-        # total_accumulate = sum(runtimes["accumulate"])
-        # total_solve = sum(runtimes["solve"])
-        # total_add = sum(runtimes["add"])
-        # total_time = total_accumulate + total_solve + total_add
-        # print(f"VBD Solver converged in {i} iterations. Total time: {total_time:.2f}ms \t Accumulate: {total_accumulate:.2f}ms ({(total_accumulate/total_time)*100:.2f}%) \t Solve: {total_solve:.2f}ms ({(total_solve/total_time)*100:.2f}%) \t Add: {total_add:.2f}ms ({(total_add/total_time)*100:.2f}%)")
 
         plot = False
         if plot:
