@@ -46,6 +46,7 @@ if __name__ == "__main__":
         def vbd_solve (simulation, nt, dt):
             simulation.reset()
             for _ in range(nt):
+                print(f"Timestep {_+1}/{nt} for NSIM={nsim}", end="\r")
                 simulation.step(dt)
 
         times = benchmark_functions([vbd_solve], sim, n_timesteps, timestep, num_samples=n_samples)

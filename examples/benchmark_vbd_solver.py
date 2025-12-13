@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
         ### Benchmark solver time
         timestep = 1e-3
-        n_timesteps = 100
+        n_timesteps = 300
         
         tip_positions = []
         def vbd_solve (simulation, nt, dt):
