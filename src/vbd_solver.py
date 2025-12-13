@@ -9,7 +9,7 @@ import warp as wp
 from coloring import graph_coloring, compute_adjacency_dict
 
 EPS = 1e-12
-MAX_ELEMENTS_PER_VERTEX = 128  # Adjust as needed for maximum number of elements incident to a vertex
+MAX_ELEMENTS_PER_VERTEX = 32  # Adjust as needed for maximum number of elements incident to a vertex
 
 
 @wp.func
@@ -283,8 +283,7 @@ def add_dx (
     if not active_mask[idx_v]:
         return
 
-    for j in range(3):
-        new_positions[idx_v][j] = positions[idx_v][j] + dx[idx_v][j]
+    new_positions[idx_v] = positions[idx_v] + wp.vec3d(dx[idx_v,0], dx[idx_v,1], dx[idx_v,2])
 
 
 @wp.kernel
@@ -574,20 +573,21 @@ class VBDSolver:
                     outputs=[gradients, hessians],
                     device=self.device
                 )
+                wp.synchronize_device(self.device)
                 wp.launch_tiled(
                     solve_grad_hess,
                     dim=n_vertices_per_color,
-                    block_dim=64,
+                    block_dim=32,
                     inputs=[gradients, hessians, self.active_mask, self.color_groups[c]],
                     outputs=[dxs]
                 )
+                wp.synchronize_device(self.device)
                 wp.launch(
                     add_dx,
                     dim=n_vertices_per_color,
                     inputs=[new_positions, dxs, self.active_mask, self.color_groups[c]],
                     outputs=[new_positions]
                 )
-                # breakpoint()
 
             hist["dx"].append(abs(dxs.numpy()).mean())
             # hist["grad"].append(abs(grads.numpy()).mean())
