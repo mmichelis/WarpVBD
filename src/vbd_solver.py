@@ -10,6 +10,7 @@ from coloring import graph_coloring, compute_adjacency_dict
 
 EPS = 1e-12
 MAX_ELEMENTS_PER_VERTEX = 32  # Adjust as needed for maximum number of elements incident to a vertex
+TILE_SIZE = 32
 
 
 @wp.func
@@ -173,7 +174,7 @@ def accumulate_grad_hess (
     hessians: wp.array4d(dtype=wp.float64)
 ) -> None:
     """
-    Accumulate gradients and Hessians for each element neighboring a vertex, and solve the local linear system to get position updates. Done for all vertices in a color group.
+    Accumulate gradients and Hessians for each element neighboring a vertex. Done for all vertices in a color group.
 
     Inputs:
         positions: Current vertex positions.
@@ -198,9 +199,8 @@ def accumulate_grad_hess (
         active_mask: Mask indicating active vertices.
     
     Outputs:
-        new_positions: Updated vertex positions.
-        grads: Accumulated gradients (for debugging).
-        dxs: Position updates that were applied.
+        gradients: Output array for gradients per vertex per neighboring element.
+        hessians: Output array for Hessians per vertex per neighboring element.
     """
     i, j = wp.tid()
 
@@ -245,26 +245,20 @@ def solve_grad_hess (
 ) -> None:
     i = wp.tid()
 
-    idx_v = color_group[i]
-    if idx_v == -1:
-        return
-
-    # Skip if vertex is not active
-    if not active_mask[idx_v]:
-        return
+    idx_v = wp.tile_load(color_group, shape=(TILE_SIZE), offset=i*TILE_SIZE)
     
-    grad = wp.tile_load(gradients[idx_v], (MAX_ELEMENTS_PER_VERTEX, 3))
-    hess = wp.tile_load(hessians[idx_v], (MAX_ELEMENTS_PER_VERTEX, 3, 3))
+    grad = wp.tile_load_indexed(gradients, idx_v, (TILE_SIZE, MAX_ELEMENTS_PER_VERTEX, 3))
+    hess = wp.tile_load_indexed(hessians, idx_v, (TILE_SIZE, MAX_ELEMENTS_PER_VERTEX, 3, 3))
     # Sum up contributions of elements to vertices
-    total_grad = wp.tile_sum(grad, axis=0)
-    total_hess = wp.tile_sum(hess, axis=0)
+    total_grad = wp.tile_sum(grad, axis=1)
+    total_hess = wp.tile_sum(hess, axis=1)
 
     # Solve for dx
     L = wp.tile_cholesky(total_hess)
     out = wp.tile_cholesky_solve(L, -total_grad)
     
     # Store results
-    wp.tile_store(dxs[idx_v], out)
+    wp.tile_store_indexed(dxs, idx_v, out)
 
 
 @wp.kernel
@@ -576,8 +570,8 @@ class VBDSolver:
                 wp.synchronize_device(self.device)
                 wp.launch_tiled(
                     solve_grad_hess,
-                    dim=n_vertices_per_color,
-                    block_dim=32,
+                    dim=n_vertices_per_color//TILE_SIZE,
+                    block_dim=TILE_SIZE,
                     inputs=[gradients, hessians, self.active_mask, self.color_groups[c]],
                     outputs=[dxs]
                 )
