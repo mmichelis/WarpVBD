@@ -563,7 +563,7 @@ class VBDSolver:
                 wp.synchronize_device(self.device)
                 wp.launch(
                     accumulate_grad_hess,
-                    dim=[n_vertices_per_color],
+                    dim=[n_vertices_per_color, self.adj_v2e.shape[1]],
                     inputs=[
                         new_positions, self.old_positions, self.old_velocities, 
                         self.inv_Dm, self.dDs_dx, 
@@ -576,17 +576,18 @@ class VBDSolver:
                 )
                 wp.launch_tiled(
                     solve_grad_hess,
-                    dim=n_vertices,
+                    dim=n_vertices_per_color,
                     block_dim=64,
                     inputs=[gradients, hessians, self.active_mask, self.color_groups[c]],
                     outputs=[dxs]
                 )
                 wp.launch(
                     add_dx,
-                    dim=n_vertices,
+                    dim=n_vertices_per_color,
                     inputs=[new_positions, dxs, self.active_mask, self.color_groups[c]],
                     outputs=[new_positions]
                 )
+                # breakpoint()
 
             hist["dx"].append(abs(dxs.numpy()).mean())
             # hist["grad"].append(abs(grads.numpy()).mean())
