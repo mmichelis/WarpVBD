@@ -42,20 +42,21 @@ if __name__ == "__main__":
             nx=(10*rf, 3*rf, 3*rf),
             dx=(dx, dx, dx),
             density=1070, youngs_modulus=150e3, poissons_ratio=0.45,
-            dx_tol=1e-9, max_iter=3000, device="cuda"
+            dx_tol=1e-6, max_iter=3000, device="cuda"
         )
         metrics["num_vertices"].append(sim.initial_positions.shape[0])
         metrics["num_elements"].append(sim.elements.shape[0])
 
         ### Benchmark solver time
         timestep = 1e-3
-        n_timesteps = 300
+        n_timesteps = 100
         
         tip_positions = []
         def vbd_solve (simulation, nt, dt):
             simulation.reset()
             tip_positions.clear()
             for _ in range(nt):
+                print(f"Timestep {_+1}/{nt} for RF={rf}", end="\r")
                 solution = simulation.step(dt)
                 tip_positions.append(solution.numpy()[simulation.tip_idx].mean(axis=0))
 

@@ -3,7 +3,7 @@ import time
 import numpy as np
 
 
-def benchmark_functions (funcs: list, *args: tuple, num_samples: int=10, **kwargs: dict) -> dict:
+def benchmark_functions (funcs: list, *args: tuple, num_samples: int=10, skipOne=False, **kwargs: dict) -> dict:
     """
     Benchmark multiple functions by running them num_samples times and recording their execution times. For the sake of compiled warp kernels, we run each function once that is not timed.
 
@@ -16,14 +16,14 @@ def benchmark_functions (funcs: list, *args: tuple, num_samples: int=10, **kwarg
         dict: A dictionary mapping function names to lists of execution times.
     """
     times = {f.__name__: [] for f in funcs}
-    for i in range(num_samples + 1):
+    for i in range(num_samples + int(skipOne)):
         results = {f.__name__: [] for f in funcs}
         for f in funcs:
             start_time = time.time()
             res = f(*args, **kwargs)
             end_time = time.time()
 
-            if i > 0:
+            if not skipOne or i > 0:
                 times[f.__name__].append(end_time - start_time)
                 results[f.__name__].append(res)
 
