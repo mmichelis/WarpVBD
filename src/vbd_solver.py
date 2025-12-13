@@ -526,6 +526,8 @@ class VBDSolver:
         n_colors = self.color_groups.shape[0]
         n_vertices_per_color = self.color_groups.shape[1]
 
+        assert MAX_ELEMENTS_PER_VERTEX >= self.adj_v2e.shape[1], "MAX_ELEMENTS_PER_VERTEX is smaller than the maximum number of incident elements per vertex. Increase this constant and recompile."
+
         if dx_tol is None:
             dx_tol = self.dx_tol
 
