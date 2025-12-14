@@ -9,7 +9,6 @@ import warp as wp
 from coloring import graph_coloring, compute_adjacency_dict
 
 EPS = 1e-12
-MAX_ELEMENTS_PER_VERTEX = 32  # Adjust as needed for maximum number of elements incident to a vertex
 
 
 @wp.func
@@ -147,7 +146,7 @@ def elastic_gradient_hessian (
 
 
 @wp.kernel
-def accumulate_grad_hess (
+def solve_grad_hess (
     positions: wp.array(dtype=wp.vec3d),
     old_positions: wp.array(dtype=wp.vec3d),
     old_velocities: wp.array(dtype=wp.vec3d),
@@ -169,11 +168,12 @@ def accumulate_grad_hess (
     color_group: wp.array(dtype=wp.int32),
     active_mask: wp.array(dtype=wp.bool),
 
-    gradients: wp.array3d(dtype=wp.float64),
-    hessians: wp.array4d(dtype=wp.float64)
+    new_positions: wp.array(dtype=wp.vec3d),
+    grads: wp.array(dtype=wp.vec3d),
+    dxs: wp.array(dtype=wp.vec3d)
 ) -> None:
     """
-    Accumulate gradients and Hessians for each element neighboring a vertex. Done for all vertices in a color group.
+    Accumulate gradients and Hessians for each element neighboring a vertex, and solve the local linear system to get position updates. Done for all vertices in a color group.
 
     Inputs:
         positions: Current vertex positions.
@@ -198,54 +198,9 @@ def accumulate_grad_hess (
         active_mask: Mask indicating active vertices.
     
     Outputs:
-        gradients: Output array for gradients per vertex per neighboring element.
-        hessians: Output array for Hessians per vertex per neighboring element.
-    """
-    i, j = wp.tid()
-
-    idx_v = color_group[i]
-    if idx_v == -1:
-        return
-
-    # Skip if vertex is not active
-    if not active_mask[idx_v]:
-        return
-
-    idx_e = adj_v2e[idx_v, j]
-    if idx_e == -1:
-        return
-
-    ### Compute gradients and hessians
-    grad_inertial, hess_inertia = inertial_gradient_hessian(idx_v, idx_e, positions, old_positions, old_velocities, masses, gravity, dt)
-    grad_elastic, hess_elastic = elastic_gradient_hessian(idx_v, idx_e, positions, volumes, inv_Dm, dDs_dx, lame_mus, lame_lambdas, elements)
-    # Add damping
-    grad_damping = damping_coefficient * hess_elastic * (positions[idx_v] - old_positions[idx_v]) / dt
-    hess_damping = damping_coefficient * hess_elastic / dt
-
-    ### Accumulate results
-    grad = grad_inertial + grad_elastic + grad_damping
-    hess = hess_inertia + hess_elastic + hess_damping
-
-    for k in range(3):
-        gradients[idx_v, j, k] = grad[k]
-        for l in range(3):
-            hessians[idx_v, j, k, l] = hess[k, l]
-
-
-
-@wp.kernel
-def solve_grad_hess (
-    positions: wp.array(dtype=wp.vec3d),
-    gradients: wp.array3d(dtype=wp.float64),
-    hessians: wp.array4d(dtype=wp.float64),
-    active_mask: wp.array(dtype=wp.bool),
-    color_group: wp.array(dtype=wp.int32),
-
-    new_positions: wp.array(dtype=wp.vec3d),
-    dxs: wp.array2d(dtype=wp.float64)
-) -> None:
-    """
-    Solve for position updates dx for all vertices in a color group, and apply updates to positions.
+        new_positions: Updated vertex positions.
+        grads: Accumulated gradients (for debugging).
+        dxs: Position updates that were applied.
     """
     i = wp.tid()
 
@@ -256,22 +211,30 @@ def solve_grad_hess (
     # Skip if vertex is not active
     if not active_mask[idx_v]:
         return
-    
-    grad = wp.tile_load(gradients[idx_v], (MAX_ELEMENTS_PER_VERTEX, 3))
-    hess = wp.tile_load(hessians[idx_v], (MAX_ELEMENTS_PER_VERTEX, 3, 3))
-    # Sum up contributions of elements to vertices
-    total_grad = wp.tile_sum(grad, axis=0)
-    total_hess = wp.tile_sum(hess, axis=0)
 
-    # Solve for dx
-    L = wp.tile_cholesky(total_hess)
-    out = wp.tile_cholesky_solve(L, -total_grad)
-    
-    # Store results
-    wp.tile_store(dxs[idx_v], out)
+    grad = wp.vec3d()
+    hess = wp.mat33d()
 
-    # Add results
-    new_positions[idx_v] = positions[idx_v] + wp.vec3d(out[0], out[1], out[2])
+    for j in range(adj_v2e.shape[1]):
+        idx_e = adj_v2e[idx_v, j]
+        if idx_e == -1:
+            continue
+
+        ### Compute gradients and hessians
+        grad_inertial, hess_inertia = inertial_gradient_hessian(idx_v, idx_e, positions, old_positions, old_velocities, masses, gravity, dt)
+        grad_elastic, hess_elastic = elastic_gradient_hessian(idx_v, idx_e, positions, volumes, inv_Dm, dDs_dx, lame_mus, lame_lambdas, elements)
+        # Add damping
+        grad_damping = damping_coefficient * hess_elastic * (positions[idx_v] - old_positions[idx_v]) / dt
+        hess_damping = damping_coefficient * hess_elastic / dt
+
+        ### Accumulate results
+        grad += grad_inertial + grad_elastic + grad_damping
+        hess += hess_inertia + hess_elastic + hess_damping
+
+    # Local linear system solve per vertex
+    grads[idx_v] = grad
+    dxs[idx_v] = wp.inverse(hess) * (-grad)
+    new_positions[idx_v] = positions[idx_v] + dxs[idx_v]
 
 
 @wp.kernel
@@ -498,6 +461,7 @@ class VBDSolver:
         self.adj_v2e = wp.array(adj_v2e, dtype=wp.int32, device=device)
 
 
+
     def reset (self) -> None:
         """
         Reset the solver state to the initial conditions.
@@ -526,8 +490,6 @@ class VBDSolver:
         n_colors = self.color_groups.shape[0]
         n_vertices_per_color = self.color_groups.shape[1]
 
-        assert MAX_ELEMENTS_PER_VERTEX >= self.adj_v2e.shape[1], "MAX_ELEMENTS_PER_VERTEX is smaller than the maximum number of incident elements per vertex. Increase this constant and recompile."
-
         if dx_tol is None:
             dx_tol = self.dx_tol
 
@@ -540,19 +502,17 @@ class VBDSolver:
             inputs=[self.old_positions, self.old_velocities, self.gravity, dt, self.active_mask],
             outputs=[new_positions]
         )
-        wp.synchronize_device(self.device)
-
-        dxs = wp.zeros((n_vertices, 3), dtype=wp.float64)
-        gradients = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3), dtype=wp.float64)
-        hessians = wp.zeros((n_vertices, self.adj_v2e.shape[1], 3, 3), dtype=wp.float64)
 
         hist = {"dx": [], "grad": []}
         for i in range(self.max_iter):
+            dxs = wp.zeros_like(new_positions)
+            grads = wp.zeros_like(new_positions)
             # Loop over colors
             for c in range(n_colors):
+                wp.synchronize_device(self.device)
                 wp.launch(
-                    accumulate_grad_hess,
-                    dim=[n_vertices_per_color, self.adj_v2e.shape[1]],
+                    solve_grad_hess,
+                    dim=[n_vertices_per_color],
                     inputs=[
                         new_positions, self.old_positions, self.old_velocities, 
                         self.inv_Dm, self.dDs_dx, 
@@ -560,21 +520,11 @@ class VBDSolver:
                         self.gravity, dt, 
                         self.elements, self.adj_v2e, self.color_groups[c], self.active_mask
                     ],
-                    outputs=[gradients, hessians],
+                    outputs=[new_positions, grads, dxs],
                     device=self.device
                 )
-                wp.synchronize_device(self.device)
-                wp.launch_tiled(
-                    solve_grad_hess,
-                    dim=n_vertices_per_color,
-                    block_dim=64,
-                    inputs=[new_positions, gradients, hessians, self.active_mask, self.color_groups[c]],
-                    outputs=[new_positions, dxs]
-                )
-                wp.synchronize_device(self.device)
-
-            # hist["dx"].append(abs(dxs.numpy()).mean())
-            # hist["grad"].append(abs(grads.numpy()).mean())
+            hist["dx"].append(abs(dxs.numpy()).mean())
+            hist["grad"].append(abs(grads.numpy()).mean())
             if abs(dxs.numpy().sum(1)).max() < dx_tol:
                 break
         
