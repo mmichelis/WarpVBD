@@ -560,4 +560,3 @@ class VBDSolver:
         self.old_positions = new_positions
 
         return new_positions
-
