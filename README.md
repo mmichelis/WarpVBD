@@ -50,7 +50,7 @@ Here we vary the number of vertices that are used for the cantilever mesh. Since
 ```
 python examples/benchmark_vbd_solve.py
 ```
-We do 100 timesteps of 1ms, sampled 3 times for mean and standard deviation in the runtime plot (standard deviation is too small to be visible), but multiply this by 10 for how long a simulated second would have taken.
+We do 300 timesteps of 1ms, sampled 3 times for mean and standard deviation in the runtime plot (standard deviation is too small to be visible), but multiply this by 10 for how long a simulated second would have taken.
 
 <p align="left">
     <img src="asset/imgs/benchmark_runtime_vbd.png" width="400px" align="top"/>

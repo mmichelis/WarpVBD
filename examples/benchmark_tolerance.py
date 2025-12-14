@@ -52,6 +52,7 @@ if __name__ == "__main__":
             simulation.reset()
             tip_positions.clear()
             for _ in range(nt):
+                print(f"Timestep {_+1}/{nt} for dx_tol={dx_tol}", end="\r")
                 solution = simulation.step(dt)
                 tip_positions.append(solution.numpy()[simulation.tip_idx].mean(axis=0))
 
